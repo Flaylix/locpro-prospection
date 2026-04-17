@@ -1,0 +1,464 @@
+
+Ajoute un module de prospection dans LocPro qui importe automatiquement des agences de location de véhicules depuis l'API Pappers.fr et les stocke dans un tableau de prospects.
+Crée src/pages/Prospects.jsx et Prospects.module.css
+Crée src/services/pappersService.js
+javascriptconst PAPPERS_API_KEY = import.meta.env.VITE_PAPPERS_API_KEY
+
+// Codes NAF des loueurs de véhicules en France
+const NAF_CODES = [
+  '7711A', // Location de courte durée de voitures et de véhicules automobiles légers
+  '7711B', // Location de longue durée de voitures et de véhicules automobiles légers
+  '7712Z', // Location et location-bail d'autres véhicules automobiles
+  '4511Z', // Commerce de voitures et de véhicules automobiles légers
+  '4519Z', // Commerce d'autres véhicules automobiles
+]
+
+export async function searchAgences({ codeNaf = '7711A', departement = '', page = 1, parPage = 100 }) {
+  const params = new URLSearchParams({
+    api_token: PAPPERS_API_KEY,
+    code_naf: codeNaf,
+    departement,
+    page,
+    par_page: parPage,
+    champs: 'siren,nom_entreprise,siege,dirigeants,email,telephone,date_creation,effectif',
+  })
+
+  const response = await fetch(`https://api.pappers.fr/v2/entreprises?${params}`)
+  if (!response.ok) throw new Error(`Pappers API error: ${response.status}`)
+  const data = await response.json()
+
+  return data.resultats?.map(e => ({
+    id: e.siren,
+    siren: e.siren,
+    nom: e.nom_entreprise,
+    email: e.email || e.siege?.email || '',
+    telephone: e.telephone || e.siege?.telephone || '',
+    adresse: [e.siege?.adresse_ligne_1, e.siege?.code_postal, e.siege?.ville].filter(Boolean).join(', '),
+    ville: e.siege?.ville || '',
+    departement: e.siege?.departement || '',
+    codePostal: e.siege?.code_postal || '',
+    codeNaf,
+    categorie: NAF_LABELS[codeNaf] || 'Location véhicules',
+    dirigeant: e.dirigeants?.[0] ? `${e.dirigeants[0].prenom || ''} ${e.dirigeants[0].nom || ''}`.trim() : '',
+    effectif: e.effectif || '',
+    dateCreation: e.date_creation || '',
+    status: 'nouveau',
+    notes: '',
+    importedAt: new Date().toISOString(),
+  })) || []
+}
+
+const NAF_LABELS = {
+  '7711A': 'Location courte durée',
+  '7711B': 'Location longue durée',
+  '7712Z': 'Location autres véhicules',
+  '4511Z': 'Commerce véhicules légers',
+  '4519Z': 'Commerce autres véhicules',
+}
+
+// Import massif — jusqu'à 400 agences
+export async function importMassif({ departements = [], codesNaf = ['7711A', '7711B'], onProgress }) {
+  const allAgences = []
+  let total = 0
+
+  for (const naf of codesNaf) {
+    for (const dept of departements.length ? departements : ['']) {
+      try {
+        const page1 = await searchAgences({ codeNaf: naf, departement: dept, page: 1, parPage: 100 })
+        allAgences.push(...page1)
+        total += page1.length
+        onProgress?.(total)
+
+        if (page1.length === 100) {
+          const page2 = await searchAgences({ codeNaf: naf, departement: dept, page: 2, parPage: 100 })
+          allAgences.push(...page2)
+          total += page2.length
+          onProgress?.(total)
+        }
+
+        if (allAgences.length >= 400) break
+        await new Promise(r => setTimeout(r, 300)) // Respecte le rate limit Pappers
+      } catch (err) {
+        console.error(`Erreur NAF ${naf} dept ${dept}:`, err)
+      }
+    }
+    if (allAgences.length >= 400) break
+  }
+
+  // Dédoublonner par SIREN
+  const unique = Array.from(new Map(allAgences.map(a => [a.siren, a])).values())
+  return unique.slice(0, 400)
+}
+
+// Sauvegarde locale
+export function saveProspects(prospects) {
+  const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
+  const existingSirens = new Set(existing.map(p => p.siren))
+  const nouveaux = prospects.filter(p => !existingSirens.has(p.siren))
+  const merged = [...nouveaux, ...existing]
+  localStorage.setItem('locpro_prospects', JSON.stringify(merged))
+  localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
+  return { total: merged.length, nouveaux: nouveaux.length }
+}
+
+export function getProspects() {
+  return JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
+}
+
+export function updateProspect(siren, updates) {
+  const prospects = getProspects()
+  const updated = prospects.map(p => p.siren === siren ? { ...p, ...updates } : p)
+  localStorage.setItem('locpro_prospects', JSON.stringify(updated))
+  return updated
+}
+
+export function deleteProspect(siren) {
+  const prospects = getProspects().filter(p => p.siren !== siren)
+  localStorage.setItem('locpro_prospects', JSON.stringify(prospects))
+}
+
+Page src/pages/Prospects.jsx :
+jsximport React, { useState, useEffect } from 'react'
+import { importMassif, saveProspects, getProspects, updateProspect, deleteProspect } from '../services/pappersService'
+import styles from './Prospects.module.css'
+
+const DEPARTEMENTS_PRINCIPAUX = [
+  { code: '75', label: 'Paris' },
+  { code: '13', label: 'Marseille' },
+  { code: '69', label: 'Lyon' },
+  { code: '31', label: 'Toulouse' },
+  { code: '06', label: 'Nice' },
+  { code: '44', label: 'Nantes' },
+  { code: '67', label: 'Strasbourg' },
+  { code: '34', label: 'Montpellier' },
+  { code: '33', label: 'Bordeaux' },
+  { code: '59', label: 'Lille' },
+  { code: '35', label: 'Rennes' },
+  { code: '76', label: 'Rouen' },
+  { code: '38', label: 'Grenoble' },
+  { code: '57', label: 'Metz' },
+  { code: '06', label: 'Nice' },
+  { code: '972', label: 'Martinique' },
+  { code: '974', label: 'Réunion' },
+]
+
+const STATUS_CONFIG = {
+  nouveau: { label: 'Nouveau', color: '#4A9EE0' },
+  contacté: { label: 'Contacté', color: '#C9A84C' },
+  intéressé: { label: 'Intéressé', color: '#4DBF8A' },
+  client: { label: 'Client ✓', color: '#4DBF8A' },
+  refusé: { label: 'Refusé', color: '#E06060' },
+}
+
+export default function Prospects() {
+  const [prospects, setProspects] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('tous')
+  const [filterDept, setFilterDept] = useState('')
+  const [lastImport, setLastImport] = useState(null)
+  const [stats, setStats] = useState({ total: 0, avecEmail: 0, contactés: 0, intéressés: 0 })
+  const [selectedProspect, setSelectedProspect] = useState(null)
+  const [showImportPanel, setShowImportPanel] = useState(false)
+  const [selectedDepts, setSelectedDepts] = useState([])
+
+  useEffect(() => {
+    const data = getProspects()
+    setProspects(data)
+    setLastImport(localStorage.getItem('locpro_prospects_lastImport'))
+    computeStats(data)
+  }, [])
+
+  function computeStats(data) {
+    setStats({
+      total: data.length,
+      avecEmail: data.filter(p => p.email).length,
+      contactés: data.filter(p => p.status === 'contacté').length,
+      intéressés: data.filter(p => p.status === 'intéressé' || p.status === 'client').length,
+    })
+  }
+
+  async function handleImport() {
+    setLoading(true)
+    setProgress(0)
+    try {
+      const agences = await importMassif({
+        departements: selectedDepts,
+        codesNaf: ['7711A', '7711B', '7712Z'],
+        onProgress: (n) => setProgress(n),
+      })
+      const result = saveProspects(agences)
+      const data = getProspects()
+      setProspects(data)
+      computeStats(data)
+      setLastImport(new Date().toISOString())
+      setShowImportPanel(false)
+      alert(`✓ Import terminé — ${result.nouveaux} nouvelles agences ajoutées (${result.total} au total)`)
+    } catch (err) {
+      alert('Erreur import: ' + err.message)
+    }
+    setLoading(false)
+    setProgress(0)
+  }
+
+  function handleStatusChange(siren, newStatus) {
+    const updated = updateProspect(siren, { status: newStatus })
+    setProspects(updated)
+    computeStats(updated)
+  }
+
+  function handleNotes(siren, notes) {
+    updateProspect(siren, { notes })
+  }
+
+  function handleDelete(siren) {
+    deleteProspect(siren)
+    const data = getProspects()
+    setProspects(data)
+    computeStats(data)
+    setSelectedProspect(null)
+  }
+
+  function exportCSV() {
+    const headers = ['Nom', 'SIREN', 'Email', 'Téléphone', 'Ville', 'Département', 'Catégorie', 'Dirigeant', 'Statut', 'Notes']
+    const rows = filtered.map(p => [p.nom, p.siren, p.email, p.telephone, p.ville, p.departement, p.categorie, p.dirigeant, p.status, p.notes].map(v => `"${v||''}"`).join(','))
+    const csv = [headers.join(','), ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `prospects-locpro-${new Date().toISOString().slice(0,10)}.csv`
+    a.click()
+  }
+
+  const filtered = prospects.filter(p => {
+    const matchSearch = !search || p.nom?.toLowerCase().includes(search.toLowerCase()) || p.ville?.toLowerCase().includes(search.toLowerCase()) || p.email?.toLowerCase().includes(search.toLowerCase())
+    const matchStatus = filterStatus === 'tous' || p.status === filterStatus
+    const matchDept = !filterDept || p.departement?.includes(filterDept) || p.codePostal?.startsWith(filterDept)
+    return matchSearch && matchStatus && matchDept
+  })
+
+  return (
+    <div className={styles.page}>
+
+      {/* HEADER */}
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Prospection</h1>
+          <p className={styles.subtitle}>{prospects.length} agences importées{lastImport ? ` · ${new Date(lastImport).toLocaleDateString('fr-FR')}` : ''}</p>
+        </div>
+        <div className={styles.headerBtns}>
+          <button className={styles.btnExport} onClick={exportCSV}>↓ CSV</button>
+          <button className={styles.btnImport} onClick={() => setShowImportPanel(true)}>+ Import</button>
+        </div>
+      </div>
+
+      {/* KPI */}
+      <div className={styles.kpiGrid}>
+        <div className={styles.kpiCard}><div className={styles.kpiVal}>{stats.total}</div><div className={styles.kpiLabel}>Total</div></div>
+        <div className={styles.kpiCard}><div className={styles.kpiVal} style={{color:'#4DBF8A'}}>{stats.avecEmail}</div><div className={styles.kpiLabel}>Avec email</div></div>
+        <div className={styles.kpiCard}><div className={styles.kpiVal} style={{color:'#C9A84C'}}>{stats.contactés}</div><div className={styles.kpiLabel}>Contactés</div></div>
+        <div className={styles.kpiCard}><div className={styles.kpiVal} style={{color:'#4DBF8A'}}>{stats.intéressés}</div><div className={styles.kpiLabel}>Intéressés</div></div>
+      </div>
+
+      {/* FILTRES */}
+      <div className={styles.filters}>
+        <input className={styles.search} placeholder="Rechercher agence, ville, email..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div className={styles.filterPills}>
+          {['tous', 'nouveau', 'contacté', 'intéressé', 'client', 'refusé'].map(s => (
+            <button key={s} className={[styles.pill, filterStatus === s ? styles.pillActive : ''].join(' ')} onClick={() => setFilterStatus(s)}>
+              {s === 'tous' ? 'Tous' : STATUS_CONFIG[s]?.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* LISTE */}
+      <div className={styles.list}>
+        {filtered.length === 0 ? (
+          <div className={styles.empty}>
+            <div style={{fontSize:40,opacity:0.3,marginBottom:12}}>🏢</div>
+            <p style={{color:'var(--t2)',fontSize:14}}>Aucune agence trouvée</p>
+            <button className={styles.btnImport} style={{marginTop:16}} onClick={() => setShowImportPanel(true)}>Importer des agences</button>
+          </div>
+        ) : filtered.map(p => (
+          <div key={p.siren} className={styles.card} onClick={() => setSelectedProspect(p)}>
+            <div className={styles.cardTop}>
+              <div className={styles.cardInfo}>
+                <div className={styles.cardName}>{p.nom}</div>
+                <div className={styles.cardMeta}>{p.ville} {p.codePostal ? `(${p.codePostal.slice(0,2)})` : ''} · {p.categorie}</div>
+              </div>
+              <span className={styles.statusPill} style={{background:`${STATUS_CONFIG[p.status]?.color}20`,color:STATUS_CONFIG[p.status]?.color}}>
+                {STATUS_CONFIG[p.status]?.label}
+              </span>
+            </div>
+            <div className={styles.cardBot}>
+              {p.email ? <span className={styles.cardContact}>✉ {p.email}</span> : <span className={styles.cardNoEmail}>Pas d'email</span>}
+              {p.telephone && <span className={styles.cardContact}>📱 {p.telephone}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* PANEL IMPORT */}
+      {showImportPanel && (
+        <div className={styles.overlay} onClick={() => !loading && setShowImportPanel(false)}>
+          <div className={styles.bottomSheet} onClick={e => e.stopPropagation()}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetHeader}>
+              <span className={styles.sheetTitle}>Import agences Pappers</span>
+              {!loading && <button className={styles.sheetClose} onClick={() => setShowImportPanel(false)}>✕</button>}
+            </div>
+            <div style={{padding:'16px 20px'}}>
+              <p style={{fontSize:12,color:'var(--t3)',marginBottom:16}}>Sélectionne les départements à cibler (vide = toute la France)</p>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:20}}>
+                {DEPARTEMENTS_PRINCIPAUX.map(d => (
+                  <button key={d.code} onClick={() => setSelectedDepts(prev => prev.includes(d.code) ? prev.filter(x=>x!==d.code) : [...prev,d.code])}
+                    style={{padding:'5px 10px',borderRadius:20,border:'0.5px solid',fontSize:11,fontFamily:'var(--font-display)',fontWeight:700,cursor:'pointer',
+                      background:selectedDepts.includes(d.code)?'var(--gold)':'transparent',
+                      borderColor:selectedDepts.includes(d.code)?'var(--gold)':'var(--bsub)',
+                      color:selectedDepts.includes(d.code)?'#0A0A0B':'var(--t3)'}}>
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              {loading ? (
+                <div style={{textAlign:'center',padding:'20px 0'}}>
+                  <div style={{fontSize:28,marginBottom:8}}>⏳</div>
+                  <p style={{color:'var(--t1)',fontWeight:600,marginBottom:4}}>{progress} agences trouvées...</p>
+                  <p style={{color:'var(--t3)',fontSize:12}}>Interrogation de l'API Pappers</p>
+                  <div style={{background:'var(--obs5)',borderRadius:20,height:4,marginTop:16,overflow:'hidden'}}>
+                    <div style={{background:'var(--gold)',height:'100%',width:`${Math.min(progress/4,100)}%`,transition:'width .3s'}} />
+                  </div>
+                </div>
+              ) : (
+                <button className={styles.btnImport} style={{width:'100%',padding:16}} onClick={handleImport}>
+                  Importer jusqu'à 400 agences
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DETAIL PROSPECT */}
+      {selectedProspect && (
+        <div className={styles.overlay} onClick={() => setSelectedProspect(null)}>
+          <div className={styles.bottomSheet} onClick={e => e.stopPropagation()}>
+            <div className={styles.sheetHandle} />
+            <div className={styles.sheetHeader}>
+              <span className={styles.sheetTitle}>{selectedProspect.nom}</span>
+              <button className={styles.sheetClose} onClick={() => setSelectedProspect(null)}>✕</button>
+            </div>
+            <div style={{padding:'0 20px 20px',overflowY:'auto',maxHeight:'60vh'}}>
+              {[
+                ['SIREN', selectedProspect.siren],
+                ['Ville', `${selectedProspect.ville} (${selectedProspect.departement})`],
+                ['Adresse', selectedProspect.adresse],
+                ['Email', selectedProspect.email || '—'],
+                ['Téléphone', selectedProspect.telephone || '—'],
+                ['Dirigeant', selectedProspect.dirigeant || '—'],
+                ['Effectif', selectedProspect.effectif || '—'],
+                ['Catégorie', selectedProspect.categorie],
+              ].map(([l,v]) => (
+                <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'0.5px solid var(--bsub)'}}>
+                  <span style={{fontSize:10,fontFamily:'var(--font-display)',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--t3)'}}>{l}</span>
+                  <span style={{fontSize:13,color:'var(--t1)',fontWeight:500,textAlign:'right',maxWidth:'60%'}}>{v}</span>
+                </div>
+              ))}
+
+              <div style={{marginTop:16}}>
+                <p style={{fontSize:10,fontFamily:'var(--font-display)',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--t3)',marginBottom:8}}>Statut</p>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {Object.entries(STATUS_CONFIG).map(([key,val]) => (
+                    <button key={key} onClick={() => { handleStatusChange(selectedProspect.siren, key); setSelectedProspect(p => ({...p, status:key})) }}
+                      style={{padding:'5px 12px',borderRadius:20,border:'0.5px solid',fontSize:11,fontFamily:'var(--font-display)',fontWeight:700,cursor:'pointer',
+                        background:selectedProspect.status===key?val.color:'transparent',
+                        borderColor:selectedProspect.status===key?val.color:'var(--bsub)',
+                        color:selectedProspect.status===key?'#0A0A0B':val.color}}>
+                      {val.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{marginTop:16}}>
+                <p style={{fontSize:10,fontFamily:'var(--font-display)',fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--t3)',marginBottom:8}}>Notes</p>
+                <textarea defaultValue={selectedProspect.notes} onBlur={e => handleNotes(selectedProspect.siren, e.target.value)}
+                  style={{width:'100%',background:'var(--obs4)',border:'0.5px solid var(--bsub)',borderRadius:10,padding:12,color:'var(--t1)',fontSize:13,fontFamily:'var(--font-body)',resize:'none',minHeight:80}} placeholder="Ajouter une note..." />
+              </div>
+
+              <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:16}}>
+                {selectedProspect.email && (
+                  <a href={`mailto:${selectedProspect.email}`} style={{display:'block',background:'var(--gold)',color:'#0A0A0B',textAlign:'center',padding:14,borderRadius:12,fontFamily:'var(--font-display)',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',textDecoration:'none'}}>
+                    ✉ Envoyer un email
+                  </a>
+                )}
+                {selectedProspect.telephone && (
+                  <a href={`tel:${selectedProspect.telephone}`} style={{display:'block',background:'transparent',border:'0.5px solid var(--bsub)',color:'var(--t2)',textAlign:'center',padding:13,borderRadius:12,fontFamily:'var(--font-display)',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',textDecoration:'none'}}>
+                    📱 Appeler
+                  </a>
+                )}
+                <button onClick={() => handleDelete(selectedProspect.siren)} style={{background:'rgba(224,96,96,0.1)',border:'0.5px solid rgba(224,96,96,0.3)',color:'#E06060',padding:13,borderRadius:12,fontFamily:'var(--font-display)',fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',cursor:'pointer'}}>
+                  Supprimer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+src/pages/Prospects.module.css :
+css.page{display:flex;flex-direction:column;height:100%;background:var(--obs);overflow:hidden}
+.header{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 12px;flex-shrink:0}
+.title{font-family:var(--font-display);font-size:20px;font-weight:700;color:var(--t1);letter-spacing:-0.02em;margin:0}
+.subtitle{font-size:11px;color:var(--t3);margin-top:2px}
+.headerBtns{display:flex;gap:8px}
+.btnExport{background:var(--obs4);border:0.5px solid var(--bsub);color:var(--t2);font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;padding:8px 12px;border-radius:8px;cursor:pointer}
+.btnImport{background:var(--gold);border:none;color:#0A0A0B;font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;padding:8px 14px;border-radius:8px;cursor:pointer}
+.kpiGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px 12px;flex-shrink:0}
+.kpiCard{background:var(--obs3);border:0.5px solid var(--bsub);border-radius:12px;padding:10px 8px;text-align:center}
+.kpiVal{font-family:var(--font-display);font-size:20px;font-weight:700;color:var(--t1)}
+.kpiLabel{font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:0.08em;margin-top:3px;font-family:var(--font-display);font-weight:600}
+.filters{padding:0 16px 12px;flex-shrink:0;display:flex;flex-direction:column;gap:8px}
+.search{background:var(--obs4);border:0.5px solid var(--bsub);border-radius:10px;padding:10px 14px;color:var(--t1);font-size:14px;font-family:var(--font-body);width:100%;outline:none}
+.filterPills{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.filterPills::-webkit-scrollbar{display:none}
+.pill{background:transparent;border:0.5px solid var(--bsub);color:var(--t3);font-family:var(--font-display);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding:5px 10px;border-radius:20px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.pillActive{background:var(--gold);border-color:var(--gold);color:#0A0A0B}
+.list{flex:1;overflow-y:auto;padding:0 16px 16px;display:flex;flex-direction:column;gap:8px}
+.card{background:var(--obs3);border:0.5px solid var(--bsub);border-radius:14px;padding:14px;cursor:pointer;transition:border-color .15s}
+.card:hover{border-color:var(--border)}
+.cardTop{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}
+.cardName{font-family:var(--font-body);font-size:14px;font-weight:600;color:var(--t1);margin-bottom:2px}
+.cardMeta{font-size:11px;color:var(--t3)}
+.statusPill{font-family:var(--font-display);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;padding:3px 9px;border-radius:20px;flex-shrink:0}
+.cardBot{display:flex;flex-direction:column;gap:3px}
+.cardContact{font-size:11px;color:var(--t2)}
+.cardNoEmail{font-size:11px;color:var(--t3);font-style:italic}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:50;display:flex;align-items:flex-end}
+.bottomSheet{background:var(--obs3);border-radius:20px 20px 0 0;width:100%;border-top:0.5px solid var(--bsub)}
+.sheetHandle{width:36px;height:4px;background:var(--obs5);border-radius:2px;margin:12px auto 0}
+.sheetHeader{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:0.5px solid var(--bsub)}
+.sheetTitle{font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--t1)}
+.sheetClose{background:var(--obs4);border:0.5px solid var(--bsub);border-radius:8px;color:var(--t3);width:28px;height:28px;cursor:pointer;font-size:13px}
+
+Ajouter dans App.jsx :
+jsximport Prospects from './pages/Prospects'
+<Route path="prospects" element={<Prospects />} />
+Ajouter dans le drawer menu Layout.jsx :
+jsx{ path: '/prospects', label: '🏢 Prospection', badge: null }
+Variable d'environnement Replit Secrets :
+VITE_PAPPERS_API_KEY=ton_token_pappers
+Obtenir la clé Pappers gratuitement :
+
+Va sur pappers.fr
+Crée un compte gratuit
+Va dans Mon compte → API
+Copie ton token gratuit (1000 requêtes/mois gratuit)
+
