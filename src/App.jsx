@@ -1,21 +1,20 @@
 import { useState, useMemo, useRef } from "react";
 
 const CATEGORIES = ["Voiture", "Luxe", "Utilitaire", "Minibus", "Moto"];
-const REGIONS = ["Île-de-France", "PACA", "Auvergne-Rhône-Alpes", "Occitanie", "Nouvelle-Aquitaine", "Bretagne", "Normandie", "Grand Est", "Hauts-de-France", "Pays de la Loire"];
+const REGIONS = [
+  "Île-de-France", "PACA", "Auvergne-Rhône-Alpes", "Occitanie",
+  "Nouvelle-Aquitaine", "Bretagne", "Normandie", "Grand Est",
+  "Hauts-de-France", "Pays de la Loire",
+];
 const QUOTAS = { brevo: 300, resend: 100 };
 
-const SAMPLE = [
-  { id: 1, nom: "AutoLoc Paris 8", email: "contact@autoloc-paris8.fr", tel: "01 42 56 78 90", ville: "Paris", region: "Île-de-France", categorie: "Voiture", prospecte: false, notes: "" },
-  { id: 2, nom: "Luxury Drive Cannes", email: "booking@luxurydrive-cannes.com", tel: "04 93 12 34 56", ville: "Cannes", region: "PACA", categorie: "Luxe", prospecte: false, notes: "" },
-  { id: 3, nom: "UtilPro Lyon", email: "info@utilpro-lyon.fr", tel: "04 72 33 44 55", ville: "Lyon", region: "Auvergne-Rhône-Alpes", categorie: "Utilitaire", prospecte: true, notes: "Intéressé" },
-  { id: 4, nom: "TransVan Marseille", email: "contact@transvan13.fr", tel: "04 91 22 33 44", ville: "Marseille", region: "PACA", categorie: "Minibus", prospecte: false, notes: "" },
-  { id: 5, nom: "Elite Cars Monaco", email: "reservation@elitecars.mc", tel: "04 93 98 00 11", ville: "Monaco", region: "PACA", categorie: "Luxe", prospecte: false, notes: "" },
-  { id: 6, nom: "RentEasy Toulouse", email: "hello@renteasy-tlse.fr", tel: "05 61 77 88 99", ville: "Toulouse", region: "Occitanie", categorie: "Voiture", prospecte: true, notes: "" },
-  { id: 7, nom: "MegaLoc Bordeaux", email: "pro@megaloc33.com", tel: "05 56 12 23 34", ville: "Bordeaux", region: "Nouvelle-Aquitaine", categorie: "Utilitaire", prospecte: false, notes: "" },
-  { id: 8, nom: "Prestige Drive Paris", email: "vip@prestige-drive.fr", tel: "01 44 55 66 77", ville: "Paris", region: "Île-de-France", categorie: "Luxe", prospecte: false, notes: "" },
-  { id: 9, nom: "BusLoc Lille", email: "contact@busloc59.fr", tel: "03 20 11 22 33", ville: "Lille", region: "Hauts-de-France", categorie: "Minibus", prospecte: false, notes: "" },
-  { id: 10, nom: "CarGo Nantes", email: "devis@cargo-nantes.fr", tel: "02 40 88 77 66", ville: "Nantes", region: "Pays de la Loire", categorie: "Utilitaire", prospecte: false, notes: "" },
-];
+const CAT_COLORS = {
+  Voiture: { bg: "#dbeafe", text: "#1d4ed8" },
+  Luxe: { bg: "#fef3c7", text: "#92400e" },
+  Utilitaire: { bg: "#d1fae5", text: "#065f46" },
+  Minibus: { bg: "#ede9fe", text: "#5b21b6" },
+  Moto: { bg: "#fee2e2", text: "#991b1b" },
+};
 
 const DEFAULT_TPL = `Bonjour,
 
@@ -34,38 +33,117 @@ L'équipe LocPro
 https://locpro.fr`;
 
 const personalize = (tpl, a) =>
-  tpl.replace(/\{NOM_AGENCE\}/g, a.nom).replace(/\{CATEGORIE\}/g, a.categorie.toLowerCase()).replace(/\{VILLE\}/g, a.ville).replace(/\{REGION\}/g, a.region);
+  tpl
+    .replace(/\{NOM_AGENCE\}/g, a.nom)
+    .replace(/\{CATEGORIE\}/g, a.categorie.toLowerCase())
+    .replace(/\{VILLE\}/g, a.ville)
+    .replace(/\{REGION\}/g, a.region);
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
-const loadSent = () => { try { const r = localStorage.getItem("lp_" + todayKey()); return r ? JSON.parse(r) : { brevo: 0, resend: 0 }; } catch { return { brevo: 0, resend: 0 }; } };
-const saveSent = (c) => { try { localStorage.setItem("lp_" + todayKey(), JSON.stringify(c)); } catch {} };
-
-const Badge = ({ cat }) => {
-  const C = { Voiture: "#3b82f6", Luxe: "#d4a853", Utilitaire: "#10b981", Minibus: "#8b5cf6", Moto: "#ef4444" }[cat] || "#666";
-  return <span style={{ background: C + "20", color: C, border: `1px solid ${C}40`, padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{cat}</span>;
+const loadSent = () => {
+  try {
+    const r = localStorage.getItem("lp_" + todayKey());
+    return r ? JSON.parse(r) : { brevo: 0, resend: 0 };
+  } catch {
+    return { brevo: 0, resend: 0 };
+  }
+};
+const saveSent = (c) => {
+  try { localStorage.setItem("lp_" + todayKey(), JSON.stringify(c)); } catch {}
 };
 
-const QBar = ({ label, used, max, color }) => {
-  const pct = Math.min(100, (used / max) * 100);
+function Badge({ cat }) {
+  const c = CAT_COLORS[cat] || { bg: "#f3f4f6", text: "#374151" };
   return (
-    <div style={{ flex: 1 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-        <span style={{ fontSize: 10, color: "#666" }}>{label}</span>
-        <span style={{ fontSize: 10, fontWeight: 700, color: used >= max ? "#ef4444" : color }}>{used >= max ? "PLEIN" : `${max - used} dispo`}</span>
+    <span style={{
+      background: c.bg, color: c.text,
+      padding: "2px 9px", borderRadius: 12,
+      fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+    }}>
+      {cat}
+    </span>
+  );
+}
+
+function QuotaBar({ label, used, max, color }) {
+  const pct = Math.min(100, (used / max) * 100);
+  const full = used >= max;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{label}</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: full ? "#dc2626" : color }}>
+          {full ? "Quota atteint" : `${max - used} restants`}
+        </span>
       </div>
-      <div style={{ height: 5, background: "#1a1a28", borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ width: pct + "%", height: "100%", background: pct >= 100 ? "#ef4444" : color, borderRadius: 3, transition: "width .4s" }} />
+      <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{
+          width: pct + "%", height: "100%",
+          background: full ? "#dc2626" : color,
+          borderRadius: 4, transition: "width .4s",
+        }} />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
-        <span style={{ fontSize: 9, color: "#2a2a38" }}>{used} envoyés</span>
-        <span style={{ fontSize: 9, color: "#2a2a38" }}>{max}/jour</span>
+        <span style={{ fontSize: 11, color: "#9ca3af" }}>{used} envoyés</span>
+        <span style={{ fontSize: 11, color: "#9ca3af" }}>{max}/jour</span>
       </div>
     </div>
   );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+        display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: "#fff", borderRadius: 12, padding: 28, width: 460,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeUp .18s ease",
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>{title}</h3>
+          <button onClick={onClose} style={styles.iconBtn}>✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  input: {
+    width: "100%", padding: "8px 12px", border: "1px solid #d1d5db",
+    borderRadius: 7, fontSize: 13, color: "#111827", background: "#fff",
+    outline: "none", boxSizing: "border-box",
+  },
+  select: {
+    padding: "8px 12px", border: "1px solid #d1d5db",
+    borderRadius: 7, fontSize: 13, color: "#111827", background: "#fff",
+    outline: "none", cursor: "pointer",
+  },
+  label: { fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 5, display: "block" },
+  btn: {
+    padding: "8px 16px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+    cursor: "pointer", border: "none", transition: "opacity .15s",
+  },
+  iconBtn: {
+    background: "none", border: "none", cursor: "pointer",
+    color: "#9ca3af", fontSize: 16, padding: "2px 6px", borderRadius: 4,
+  },
+  card: {
+    background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 18,
+  },
 };
 
 export default function App() {
-  const [agencies, setAgencies] = useState(SAMPLE);
+  const [agencies, setAgencies] = useState([]);
   const [selected, setSelected] = useState(new Set());
   const [search, setSearch] = useState("");
   const [fCat, setFCat] = useState("Tout");
@@ -78,7 +156,8 @@ export default function App() {
   const [senderEmail, setSenderEmail] = useState("prospection@locpro.fr");
   const [brevoKey, setBrevoKey] = useState("");
   const [resendKey, setResendKey] = useState("");
-  const [showKeys, setShowKeys] = useState(false);
+  const [claudeKey, setClaudeKey] = useState("");
+  const [showConfig, setShowConfig] = useState(false);
   const [mode, setMode] = useState("auto");
   const [sentToday, setSentToday] = useState(loadSent);
   const [sending, setSending] = useState(false);
@@ -96,6 +175,7 @@ export default function App() {
 
   const hasBrevo = !!brevoKey.trim();
   const hasResend = !!resendKey.trim();
+  const hasClaude = !!claudeKey.trim();
   const hasKey = hasBrevo || hasResend;
   const qBrevo = Math.max(0, QUOTAS.brevo - sentToday.brevo);
   const qResend = Math.max(0, QUOTAS.resend - sentToday.resend);
@@ -104,13 +184,16 @@ export default function App() {
   const filtered = useMemo(() => {
     let list = agencies.filter(a => {
       const q = search.toLowerCase();
-      return (!q || a.nom.toLowerCase().includes(q) || a.email.toLowerCase().includes(q) || a.ville.toLowerCase().includes(q))
-        && (fCat === "Tout" || a.categorie === fCat)
-        && (fReg === "Toutes" || a.region === fReg)
-        && (fSt === "Tous" || (fSt === "Prospecté" ? a.prospecte : !a.prospecte));
+      return (
+        (!q || a.nom.toLowerCase().includes(q) || a.email.toLowerCase().includes(q) || a.ville.toLowerCase().includes(q)) &&
+        (fCat === "Tout" || a.categorie === fCat) &&
+        (fReg === "Toutes" || a.region === fReg) &&
+        (fSt === "Tous" || (fSt === "Prospecté" ? a.prospecte : !a.prospecte))
+      );
     });
     return [...list].sort((a, b) => {
-      const va = (a[sortF] || "").toString().toLowerCase(), vb = (b[sortF] || "").toString().toLowerCase();
+      const va = (a[sortF] || "").toString().toLowerCase();
+      const vb = (b[sortF] || "").toString().toLowerCase();
       return sortD === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
     });
   }, [agencies, search, fCat, fReg, fSt, sortF, sortD]);
@@ -132,26 +215,47 @@ export default function App() {
   const doImport = () => {
     const added = importText.trim().split("\n").filter(Boolean).map(line => {
       const p = line.split(";").map(x => x.trim());
-      return p.length >= 2 ? { id: Date.now() + Math.random(), nom: p[0], email: p[1], tel: p[2] || "", ville: p[3] || "", region: p[4] || REGIONS[0], categorie: CATEGORIES.includes(p[5]) ? p[5] : "Voiture", prospecte: false, notes: p[6] || "" } : null;
+      if (p.length < 2) return null;
+      return {
+        id: Date.now() + Math.random(),
+        nom: p[0], email: p[1], tel: p[2] || "", ville: p[3] || "",
+        region: p[4] || REGIONS[0],
+        categorie: CATEGORIES.includes(p[5]) ? p[5] : "Voiture",
+        prospecte: false, notes: p[6] || "",
+      };
     }).filter(Boolean);
-    if (added.length) { setAgencies(p => [...p, ...added]); setImportText(""); alert(`✅ ${added.length} agences importées !`); }
+    if (added.length) {
+      setAgencies(p => [...p, ...added]);
+      setImportText("");
+      alert(`${added.length} agence(s) importée(s) avec succès.`);
+    }
   };
 
   const exportCSV = () => {
-    const rows = ["Nom;Email;Tél;Ville;Région;Catégorie;Prospecté;Notes", ...agencies.map(a => `${a.nom};${a.email};${a.tel};${a.ville};${a.region};${a.categorie};${a.prospecte ? "Oui" : "Non"};${a.notes}`)].join("\n");
-    const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([rows], { type: "text/csv" })), download: "locpro-agences.csv" });
-    link.click();
+    const rows = [
+      "Nom;Email;Tél;Ville;Région;Catégorie;Prospecté;Notes",
+      ...agencies.map(a => `${a.nom};${a.email};${a.tel};${a.ville};${a.region};${a.categorie};${a.prospecte ? "Oui" : "Non"};${a.notes}`),
+    ].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
+    a.download = "locpro-agences.csv";
+    a.click();
   };
 
   const improveAI = async () => {
-    if (!aiPrompt.trim()) return;
+    if (!aiPrompt.trim() || !hasClaude) return;
     setAiLoading(true);
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": claudeKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514", max_tokens: 1000,
+          model: "claude-opus-4-5", max_tokens: 1000,
           system: "Tu es expert cold email B2B France. Tu écris des emails de prospection pour LocPro (SaaS contrats de location véhicules). Garde TOUJOURS {NOM_AGENCE}, {CATEGORIE}, {VILLE}. Retourne UNIQUEMENT le corps du mail.",
           messages: [{ role: "user", content: `Instruction: ${aiPrompt}\n\nMail actuel:\n${tpl}\n\nRéécris.` }],
         }),
@@ -159,7 +263,10 @@ export default function App() {
       const data = await res.json();
       const text = data.content?.map(c => c.text || "").join("") || "";
       if (text) setTpl(text);
-    } catch { alert("Erreur API Claude"); }
+      else alert("Réponse vide de Claude.");
+    } catch {
+      alert("Erreur API Claude. Vérifiez votre clé.");
+    }
     setAiLoading(false);
   };
 
@@ -169,7 +276,7 @@ export default function App() {
       headers: { "Content-Type": "application/json", "api-key": brevoKey },
       body: JSON.stringify({ sender: { name: senderName, email: senderEmail }, to: [{ email: agency.email, name: agency.nom }], subject: subj, textContent: body }),
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Brevo error"); }
+    if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Erreur Brevo"); }
   };
 
   const sendViaResend = async (agency, subj, body) => {
@@ -178,7 +285,7 @@ export default function App() {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${resendKey}` },
       body: JSON.stringify({ from: `${senderName} <${senderEmail}>`, to: [agency.email], subject: subj, text: body }),
     });
-    if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Resend error"); }
+    if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Erreur Resend"); }
   };
 
   const handleSend = async () => {
@@ -192,6 +299,7 @@ export default function App() {
       if (abortRef.current) { newLog.push({ nom: agency.nom, status: "annulé", provider: "-" }); continue; }
       const body = personalize(tpl, agency);
       let provider = null;
+
       if (mode === "brevo" && hasBrevo && local.brevo < QUOTAS.brevo) provider = "brevo";
       else if (mode === "resend" && hasResend && local.resend < QUOTAS.resend) provider = "resend";
       else if (mode === "auto") {
@@ -221,232 +329,377 @@ export default function App() {
     setSending(false); setDone(true); setSelected(new Set());
   };
 
-  const stats = { total: agencies.length, done: agencies.filter(a => a.prospecte).length, todo: agencies.filter(a => !a.prospecte).length, sel: selected.size };
+  const stats = {
+    total: agencies.length,
+    done: agencies.filter(a => a.prospecte).length,
+    todo: agencies.filter(a => !a.prospecte).length,
+    sel: selected.size,
+  };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#080810", color: "#e0dbd2", fontFamily: "'DM Mono',monospace", display: "flex", flexDirection: "column" }}>
+    <div style={{ minHeight: "100vh", background: "#f3f4f6", color: "#111827", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0}
-        ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:#0c0c16}::-webkit-scrollbar-thumb{background:#22222e;border-radius:3px}
-        input,textarea,select{outline:none;font-family:inherit}button{cursor:pointer;font-family:inherit}
-        .rh:hover{background:#0f0f1c!important}.th:hover{color:#d4a853;cursor:pointer}.ab:hover{opacity:.75}
-        @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-        input::placeholder,textarea::placeholder{color:#25252e}
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        input, textarea, select { outline: none; font-family: inherit; }
+        button { cursor: pointer; font-family: inherit; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f3f4f6; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        .row-hover:hover { background: #f9fafb !important; }
+        .col-sort:hover { color: #6366f1; cursor: pointer; }
+        .btn-hover:hover { opacity: 0.85; }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        input::placeholder, textarea::placeholder { color: #9ca3af; }
       `}</style>
 
-      {/* HEADER */}
-      <div style={{ background: "#0b0b14", borderBottom: "1px solid #16162a", padding: "13px 22px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#d4a853,#7a5215)", borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center" }}>⚡</div>
+      {/* ── HEADER ── */}
+      <header style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 58 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>⚡</div>
           <div>
-            <div style={{ fontFamily: "Syne,sans-serif", fontWeight: 800, fontSize: 16, color: "#d4a853", letterSpacing: "-0.02em" }}>LOCPRO</div>
-            <div style={{ fontSize: 9, color: "#2a2a3a", letterSpacing: "0.12em", textTransform: "uppercase" }}>CRM · Prospection Agences France</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#111827", letterSpacing: "-0.02em" }}>LocPro CRM</div>
+            <div style={{ fontSize: 11, color: "#9ca3af" }}>Prospection agences de location · France</div>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={() => setShowKeys(!showKeys)} className="ab" style={{ background: hasKey ? "#0a160a" : "#160a0a", border: `1px solid ${hasKey ? "#10b98133" : "#ef444433"}`, color: hasKey ? "#10b981" : "#ef4444", padding: "5px 12px", borderRadius: 6, fontSize: 10 }}>
-            {hasKey ? "🔑 APIs OK" : "⚠️ Config APIs"}
-          </button>
-          <button onClick={exportCSV} className="ab" style={{ background: "#111", border: "1px solid #1c1c28", color: "#777", padding: "5px 11px", borderRadius: 6, fontSize: 10 }}>↓ CSV</button>
-          <button onClick={() => setShowAdd(true)} className="ab" style={{ background: "#d4a853", border: "none", color: "#080810", padding: "5px 14px", borderRadius: 6, fontSize: 10, fontWeight: 700 }}>+ Agence</button>
-        </div>
-      </div>
 
-      {/* PANEL APIS */}
-      {showKeys && (
-        <div style={{ background: "#0a0a16", borderBottom: "1px solid #16162a", padding: "16px 22px", animation: "slideIn .2s ease" }}>
-          <div style={{ fontSize: 10, color: "#d4a853", fontWeight: 600, marginBottom: 12, letterSpacing: "0.08em" }}>🔑 CONFIGURATION APIS</div>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.1em", marginBottom: 5 }}>
-                BREVO · <span style={{ color: "#10b981" }}>300/jour gratuit</span> · <a href="https://app.brevo.com/settings/keys/api" target="_blank" style={{ color: "#5a8fd4", textDecoration: "none" }}>Créer clé ↗</a>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={() => setShowConfig(!showConfig)}
+            className="btn-hover"
+            style={{
+              ...styles.btn,
+              background: hasKey ? "#f0fdf4" : "#fef3c7",
+              color: hasKey ? "#16a34a" : "#92400e",
+              border: `1px solid ${hasKey ? "#bbf7d0" : "#fde68a"}`,
+              fontSize: 12,
+            }}
+          >
+            {hasKey ? "✓ APIs configurées" : "⚙ Configurer les APIs"}
+          </button>
+          <button onClick={exportCSV} className="btn-hover" style={{ ...styles.btn, background: "#f9fafb", border: "1px solid #e5e7eb", color: "#374151", fontSize: 12 }}>
+            ↓ Export CSV
+          </button>
+          <button onClick={() => setShowAdd(true)} className="btn-hover" style={{ ...styles.btn, background: "#6366f1", color: "#fff", fontSize: 12 }}>
+            + Nouvelle agence
+          </button>
+        </div>
+      </header>
+
+      {/* ── PANEL CONFIG APIs ── */}
+      {showConfig && (
+        <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "20px 24px", animation: "fadeUp .18s ease" }}>
+          <div style={{ maxWidth: 900 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 16 }}>Configuration des APIs</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={styles.label}>
+                  Brevo — <span style={{ color: "#16a34a", fontWeight: 700 }}>300 emails/jour gratuit</span>
+                  {" · "}<a href="https://app.brevo.com/settings/keys/api" target="_blank" style={{ color: "#6366f1" }}>Créer une clé ↗</a>
+                </label>
+                <input type="password" value={brevoKey} onChange={e => setBrevoKey(e.target.value)} placeholder="xkeysib-..." style={{ ...styles.input, borderColor: hasBrevo ? "#86efac" : "#d1d5db" }} />
               </div>
-              <input type="password" value={brevoKey} onChange={e => setBrevoKey(e.target.value)} placeholder="xkeysib-..." style={{ width: "100%", background: "#0d0d18", border: `1px solid ${hasBrevo ? "#10b98155" : "#1c1c28"}`, color: "#ddd", padding: "7px 11px", borderRadius: 6, fontSize: 11 }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.1em", marginBottom: 5 }}>
-                RESEND · <span style={{ color: "#5a8fd4" }}>100/jour gratuit</span> · <a href="https://resend.com/api-keys" target="_blank" style={{ color: "#5a8fd4", textDecoration: "none" }}>Créer clé ↗</a>
+              <div>
+                <label style={styles.label}>
+                  Resend — <span style={{ color: "#6366f1", fontWeight: 700 }}>100 emails/jour gratuit</span>
+                  {" · "}<a href="https://resend.com/api-keys" target="_blank" style={{ color: "#6366f1" }}>Créer une clé ↗</a>
+                </label>
+                <input type="password" value={resendKey} onChange={e => setResendKey(e.target.value)} placeholder="re_..." style={{ ...styles.input, borderColor: hasResend ? "#86efac" : "#d1d5db" }} />
               </div>
-              <input type="password" value={resendKey} onChange={e => setResendKey(e.target.value)} placeholder="re_..." style={{ width: "100%", background: "#0d0d18", border: `1px solid ${hasResend ? "#5a8fd455" : "#1c1c28"}`, color: "#ddd", padding: "7px 11px", borderRadius: 6, fontSize: 11 }} />
+              <div>
+                <label style={styles.label}>
+                  Claude (Anthropic) — IA de réécriture
+                  {" · "}<a href="https://console.anthropic.com/settings/keys" target="_blank" style={{ color: "#6366f1" }}>Créer une clé ↗</a>
+                </label>
+                <input type="password" value={claudeKey} onChange={e => setClaudeKey(e.target.value)} placeholder="sk-ant-..." style={{ ...styles.input, borderColor: hasClaude ? "#86efac" : "#d1d5db" }} />
+              </div>
             </div>
-            <div style={{ minWidth: 170 }}>
-              <div style={{ fontSize: 9, color: "#444", letterSpacing: "0.1em", marginBottom: 5 }}>MODE D'ENVOI</div>
-              <select value={mode} onChange={e => setMode(e.target.value)} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "7px 10px", borderRadius: 6, fontSize: 11 }}>
-                <option value="auto">🔄 Rotation auto (Brevo→Resend)</option>
-                <option value="brevo">Brevo uniquement</option>
-                <option value="resend">Resend uniquement</option>
-              </select>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={styles.label}>Nom expéditeur</label>
+                <input value={senderName} onChange={e => setSenderName(e.target.value)} style={styles.input} />
+              </div>
+              <div>
+                <label style={styles.label}>Email expéditeur <span style={{ color: "#9ca3af" }}>(vérifié dans Brevo/Resend)</span></label>
+                <input value={senderEmail} onChange={e => setSenderEmail(e.target.value)} style={styles.input} />
+              </div>
+              <div>
+                <label style={styles.label}>Mode d'envoi</label>
+                <select value={mode} onChange={e => setMode(e.target.value)} style={{ ...styles.select, width: "100%" }}>
+                  <option value="auto">Rotation automatique (Brevo → Resend)</option>
+                  <option value="brevo">Brevo uniquement</option>
+                  <option value="resend">Resend uniquement</option>
+                </select>
+              </div>
             </div>
-          </div>
-          <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: "#444", marginBottom: 5, letterSpacing: "0.1em" }}>NOM EXPÉDITEUR</div>
-              <input value={senderName} onChange={e => setSenderName(e.target.value)} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 11px", borderRadius: 6, fontSize: 11 }} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: "#444", marginBottom: 5, letterSpacing: "0.1em" }}>EMAIL EXPÉDITEUR <span style={{ color: "#333" }}>(vérifié dans Brevo/Resend)</span></div>
-              <input value={senderEmail} onChange={e => setSenderEmail(e.target.value)} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 11px", borderRadius: 6, fontSize: 11 }} />
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 16, marginTop: 14, alignItems: "center" }}>
-            <QBar label="BREVO" used={sentToday.brevo} max={QUOTAS.brevo} color="#10b981" />
-            <QBar label="RESEND" used={sentToday.resend} max={QUOTAS.resend} color="#5a8fd4" />
-            <div style={{ minWidth: 150, textAlign: "right" }}>
-              <div style={{ fontSize: 10, color: "#555" }}>Total disponible aujourd'hui</div>
-              <div style={{ fontSize: 26, fontFamily: "Syne,sans-serif", fontWeight: 800, color: totalQ > 0 ? "#d4a853" : "#ef4444", lineHeight: 1.1 }}>{totalQ} <span style={{ fontSize: 11, color: "#444" }}>mails</span></div>
-              <div style={{ fontSize: 9, color: "#2a2a38", marginTop: 2 }}>Plans payants → jusqu'à 20k/mois</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 20, alignItems: "end" }}>
+              <QuotaBar label="Brevo" used={sentToday.brevo} max={QUOTAS.brevo} color="#16a34a" />
+              <QuotaBar label="Resend" used={sentToday.resend} max={QUOTAS.resend} color="#6366f1" />
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 2 }}>Total disponible aujourd'hui</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: totalQ > 0 ? "#6366f1" : "#dc2626", lineHeight: 1 }}>
+                  {totalQ} <span style={{ fontSize: 14, color: "#9ca3af", fontWeight: 400 }}>emails</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* STATS */}
-      <div style={{ background: "#0b0b14", borderBottom: "1px solid #12122a", padding: "8px 22px", display: "flex", gap: 22, alignItems: "center" }}>
-        {[{ l: "Total", v: stats.total, c: "#777" }, { l: "À prospecter", v: stats.todo, c: "#ef4444" }, { l: "Prospecté", v: stats.done, c: "#10b981" }, { l: "Sélectionné", v: stats.sel, c: "#d4a853" }].map(s => (
-          <div key={s.l} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 18, fontFamily: "Syne,sans-serif", fontWeight: 800, color: s.c }}>{s.v}</span>
-            <span style={{ fontSize: 9, color: "#2a2a38", textTransform: "uppercase", letterSpacing: "0.09em" }}>{s.l}</span>
+      {/* ── STAT PILLS ── */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "10px 24px", display: "flex", gap: 20, alignItems: "center" }}>
+        {[
+          { label: "Total", value: stats.total, color: "#6b7280" },
+          { label: "À contacter", value: stats.todo, color: "#dc2626" },
+          { label: "Prospectés", value: stats.done, color: "#16a34a" },
+          { label: "Sélectionnés", value: stats.sel, color: "#6366f1" },
+        ].map(s => (
+          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</span>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{s.label}</span>
           </div>
         ))}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 7, alignItems: "center" }}>
-          <div style={{ width: 90, height: 3, background: "#121220", borderRadius: 2, overflow: "hidden" }}>
-            <div style={{ width: `${stats.total ? (stats.done / stats.total) * 100 : 0}%`, height: "100%", background: "linear-gradient(90deg,#d4a853,#10b981)", transition: "width .4s" }} />
+        {stats.total > 0 && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 100, height: 5, background: "#e5e7eb", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ width: `${(stats.done / stats.total) * 100}%`, height: "100%", background: "#6366f1", borderRadius: 3, transition: "width .4s" }} />
+            </div>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{Math.round((stats.done / stats.total) * 100)}% prospecté</span>
           </div>
-          <span style={{ fontSize: 9, color: "#333" }}>{stats.total ? Math.round((stats.done / stats.total) * 100) : 0}%</span>
-        </div>
+        )}
       </div>
 
-      {/* TABS */}
-      <div style={{ borderBottom: "1px solid #12122a", padding: "0 22px", display: "flex" }}>
-        {[["liste", "📋 Base Agences"], ["mail", "✉️ Campagne Mail"], ["import", "📥 Import / Guide"]].map(([k, l]) => (
-          <button key={k} onClick={() => setTab(k)} style={{ background: "transparent", border: "none", color: tab === k ? "#d4a853" : "#333", padding: "10px 15px", fontSize: 10, letterSpacing: "0.06em", borderBottom: tab === k ? "2px solid #d4a853" : "2px solid transparent", transition: "all .15s" }}>{l}</button>
+      {/* ── TABS ── */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "0 24px", display: "flex", gap: 4 }}>
+        {[["liste", "Base Agences"], ["mail", "Campagne Email"], ["import", "Import & Sources"]].map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            style={{
+              background: "none", border: "none", padding: "13px 14px", fontSize: 13, fontWeight: tab === k ? 700 : 500,
+              color: tab === k ? "#6366f1" : "#6b7280",
+              borderBottom: tab === k ? "2px solid #6366f1" : "2px solid transparent",
+              transition: "all .15s",
+            }}
+          >
+            {l}
+          </button>
         ))}
       </div>
 
-      {/* ══ LISTE ══ */}
+      {/* ══════════════════════ TAB: LISTE ══════════════════════ */}
       {tab === "liste" && (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ padding: "9px 22px", background: "#0b0b14", borderBottom: "1px solid #12122a", display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Rechercher..." style={{ background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "5px 10px", borderRadius: 5, fontSize: 10, width: 170 }} />
-            <select value={fCat} onChange={e => setFCat(e.target.value)} style={{ background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "5px 8px", borderRadius: 5, fontSize: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 185px)" }}>
+          {/* Filtres */}
+          <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "10px 24px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher une agence…"
+              style={{ ...styles.input, width: 200 }}
+            />
+            <select value={fCat} onChange={e => setFCat(e.target.value)} style={styles.select}>
               {["Tout", ...CATEGORIES].map(o => <option key={o}>{o}</option>)}
             </select>
-            <select value={fReg} onChange={e => setFReg(e.target.value)} style={{ background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "5px 8px", borderRadius: 5, fontSize: 10 }}>
+            <select value={fReg} onChange={e => setFReg(e.target.value)} style={styles.select}>
               {["Toutes", ...REGIONS].map(o => <option key={o}>{o}</option>)}
             </select>
-            <select value={fSt} onChange={e => setFSt(e.target.value)} style={{ background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "5px 8px", borderRadius: 5, fontSize: 10 }}>
+            <select value={fSt} onChange={e => setFSt(e.target.value)} style={styles.select}>
               {["Tous", "Non prospecté", "Prospecté"].map(o => <option key={o}>{o}</option>)}
             </select>
-            <button onClick={() => setSelected(new Set(filtered.filter(a => !a.prospecte).map(a => a.id)))} className="ab" style={{ background: "#141420", border: "1px solid #22222e", color: "#777", padding: "5px 10px", borderRadius: 5, fontSize: 9 }}>Sélect. non prospecté</button>
+            <button
+              onClick={() => setSelected(new Set(filtered.filter(a => !a.prospecte).map(a => a.id)))}
+              className="btn-hover"
+              style={{ ...styles.btn, background: "#f9fafb", border: "1px solid #e5e7eb", color: "#374151", fontSize: 12 }}
+            >
+              Sélect. non prospectés
+            </button>
             {selected.size > 0 && (
-              <button onClick={() => setTab("mail")} style={{ marginLeft: "auto", background: "#d4a853", border: "none", color: "#080810", padding: "5px 14px", borderRadius: 5, fontSize: 10, fontWeight: 700, animation: "pulse 2s infinite" }}>
-                ✉️ Campagne → {selected.size} agences
+              <button
+                onClick={() => setTab("mail")}
+                className="btn-hover"
+                style={{ ...styles.btn, marginLeft: "auto", background: "#6366f1", color: "#fff", fontSize: 12 }}
+              >
+                ✉ Lancer une campagne ({selected.size})
               </button>
             )}
           </div>
-          <div style={{ flex: 1, overflow: "auto", padding: "0 22px 20px" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 10 }}>
-              <thead>
-                <tr style={{ color: "#2a2a38", borderBottom: "1px solid #12122a" }}>
-                  <th style={{ padding: "7px 8px", width: 28 }}><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} style={{ accentColor: "#d4a853" }} /></th>
-                  {[["nom", "Agence"], ["categorie", "Type"], ["ville", "Ville"], ["region", "Région"], ["email", "Email"], ["tel", "Tél"]].map(([f, l]) => (
-                    <th key={f} className="th" onClick={() => sortBy(f)} style={{ padding: "7px 10px", textAlign: "left", fontWeight: 500, textTransform: "uppercase", fontSize: 9, letterSpacing: "0.1em", whiteSpace: "nowrap" }}>
-                      {l}{sortF === f ? (sortD === "asc" ? " ↑" : " ↓") : ""}
+
+          {/* Table */}
+          <div style={{ flex: 1, overflow: "auto", padding: "0 24px 24px" }}>
+            {agencies.length === 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, color: "#9ca3af" }}>
+                <div style={{ fontSize: 48 }}>🏢</div>
+                <div style={{ fontSize: 16, fontWeight: 600, color: "#374151" }}>Aucune agence pour l'instant</div>
+                <div style={{ fontSize: 13 }}>Ajoutez une agence manuellement ou importez un fichier CSV.</div>
+                <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                  <button onClick={() => setShowAdd(true)} className="btn-hover" style={{ ...styles.btn, background: "#6366f1", color: "#fff" }}>+ Nouvelle agence</button>
+                  <button onClick={() => setTab("import")} className="btn-hover" style={{ ...styles.btn, background: "#f9fafb", border: "1px solid #e5e7eb", color: "#374151" }}>Importer un CSV</button>
+                </div>
+              </div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 14 }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
+                    <th style={{ padding: "8px 10px", width: 32 }}>
+                      <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} style={{ accentColor: "#6366f1" }} />
                     </th>
-                  ))}
-                  <th style={{ padding: "7px 10px", fontSize: 9, textTransform: "uppercase", letterSpacing: "0.1em" }}>Statut</th>
-                  <th style={{ width: 36 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(a => (
-                  <tr key={a.id} className="rh" style={{ borderBottom: "1px solid #0e0e1c", background: selected.has(a.id) ? "#0e0e1c" : "transparent" }}>
-                    <td style={{ padding: "9px 8px" }}><input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleSel(a.id)} style={{ accentColor: "#d4a853" }} /></td>
-                    <td style={{ padding: "9px 10px", color: "#ddd", fontWeight: 500 }}>{a.nom}</td>
-                    <td style={{ padding: "9px 10px" }}><Badge cat={a.categorie} /></td>
-                    <td style={{ padding: "9px 10px", color: "#666" }}>{a.ville}</td>
-                    <td style={{ padding: "9px 10px", color: "#444" }}>{a.region}</td>
-                    <td style={{ padding: "9px 10px", color: "#4a7abd", fontSize: 10 }}>{a.email}</td>
-                    <td style={{ padding: "9px 10px", color: "#444" }}>{a.tel}</td>
-                    <td style={{ padding: "9px 10px" }}>
-                      <button onClick={() => toggleProsp(a.id)} style={{ background: a.prospecte ? "#0a160a" : "#141420", border: `1px solid ${a.prospecte ? "#10b98144" : "#22222e"}`, color: a.prospecte ? "#10b981" : "#333", padding: "2px 10px", borderRadius: 20, fontSize: 9, fontWeight: 600 }}>
-                        {a.prospecte ? "✓ Fait" : "À faire"}
-                      </button>
-                    </td>
-                    <td style={{ padding: "9px 8px", textAlign: "right" }}>
-                      <button onClick={() => delAgency(a.id)} style={{ background: "transparent", border: "none", color: "#1e1e28", fontSize: 12 }} onMouseEnter={e => e.target.style.color = "#ef4444"} onMouseLeave={e => e.target.style.color = "#1e1e28"}>✕</button>
-                    </td>
+                    {[["nom", "Agence"], ["categorie", "Type"], ["ville", "Ville"], ["region", "Région"], ["email", "Email"], ["tel", "Téléphone"]].map(([f, l]) => (
+                      <th
+                        key={f}
+                        className="col-sort"
+                        onClick={() => sortBy(f)}
+                        style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151", fontSize: 12, whiteSpace: "nowrap" }}
+                      >
+                        {l} {sortF === f ? (sortD === "asc" ? "↑" : "↓") : ""}
+                      </th>
+                    ))}
+                    <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151", fontSize: 12 }}>Statut</th>
+                    <th style={{ width: 40 }} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {!filtered.length && <div style={{ textAlign: "center", color: "#1e1e28", padding: "50px 0", fontSize: 11 }}>Aucune agence</div>}
+                </thead>
+                <tbody>
+                  {filtered.map(a => (
+                    <tr
+                      key={a.id}
+                      className="row-hover"
+                      style={{ borderBottom: "1px solid #f3f4f6", background: selected.has(a.id) ? "#eef2ff" : "#fff" }}
+                    >
+                      <td style={{ padding: "10px 10px" }}>
+                        <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleSel(a.id)} style={{ accentColor: "#6366f1" }} />
+                      </td>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: "#111827" }}>{a.nom}</td>
+                      <td style={{ padding: "10px 12px" }}><Badge cat={a.categorie} /></td>
+                      <td style={{ padding: "10px 12px", color: "#374151" }}>{a.ville}</td>
+                      <td style={{ padding: "10px 12px", color: "#6b7280", fontSize: 12 }}>{a.region}</td>
+                      <td style={{ padding: "10px 12px", color: "#6366f1", fontSize: 12 }}>{a.email}</td>
+                      <td style={{ padding: "10px 12px", color: "#6b7280", fontSize: 12 }}>{a.tel}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        <button
+                          onClick={() => toggleProsp(a.id)}
+                          style={{
+                            padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                            background: a.prospecte ? "#f0fdf4" : "#fef2f2",
+                            color: a.prospecte ? "#16a34a" : "#dc2626",
+                            border: `1px solid ${a.prospecte ? "#bbf7d0" : "#fecaca"}`,
+                          }}
+                        >
+                          {a.prospecte ? "✓ Prospecté" : "À contacter"}
+                        </button>
+                      </td>
+                      <td style={{ padding: "10px 8px", textAlign: "center" }}>
+                        <button
+                          onClick={() => delAgency(a.id)}
+                          style={{ background: "none", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer" }}
+                          onMouseEnter={e => e.target.style.color = "#dc2626"}
+                          onMouseLeave={e => e.target.style.color = "#d1d5db"}
+                        >✕</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {agencies.length > 0 && filtered.length === 0 && (
+              <div style={{ textAlign: "center", color: "#9ca3af", padding: "48px 0", fontSize: 13 }}>
+                Aucune agence ne correspond aux filtres.
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ══ MAIL ══ */}
+      {/* ══════════════════════ TAB: MAIL ══════════════════════ */}
       {tab === "mail" && (
-        <div style={{ flex: 1, overflow: "auto", padding: "18px 22px", display: "flex", gap: 18 }}>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 11 }}>
-            <div style={{ color: "#d4a853", fontFamily: "Syne,sans-serif", fontWeight: 700, fontSize: 13 }}>✉️ Template Personnalisé</div>
-            <div>
-              <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 5 }}>Objet</div>
-              <input value={subject} onChange={e => setSubject(e.target.value)} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "7px 11px", borderRadius: 5, fontSize: 11 }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 5 }}>
-                Corps — <span style={{ color: "#d4a853" }}>{"{NOM_AGENCE}"}</span> · <span style={{ color: "#5a8fd4" }}>{"{CATEGORIE}"}</span> · <span style={{ color: "#10b981" }}>{"{VILLE}"}</span>
+        <div style={{ flex: 1, overflow: "auto", padding: "20px 24px", display: "flex", gap: 20, height: "calc(100vh - 185px)" }}>
+          {/* Colonne gauche */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>
+            <div style={styles.card}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 14 }}>Modèle d'email</div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={styles.label}>Objet de l'email</label>
+                <input value={subject} onChange={e => setSubject(e.target.value)} style={styles.input} />
               </div>
-              <textarea value={tpl} onChange={e => setTpl(e.target.value)} rows={12} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "10px 11px", borderRadius: 5, fontSize: 11, lineHeight: 1.7, resize: "vertical" }} />
+              <div>
+                <label style={styles.label}>
+                  Corps —{" "}
+                  <span style={{ color: "#6366f1" }}>{"{NOM_AGENCE}"}</span>{" · "}
+                  <span style={{ color: "#16a34a" }}>{"{CATEGORIE}"}</span>{" · "}
+                  <span style={{ color: "#f59e0b" }}>{"{VILLE}"}</span>
+                </label>
+                <textarea
+                  value={tpl} onChange={e => setTpl(e.target.value)}
+                  rows={12}
+                  style={{ ...styles.input, lineHeight: 1.7, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
+                />
+              </div>
             </div>
-            <div style={{ background: "#0d0d1c", border: "1px solid #1c1c2c", borderRadius: 7, padding: 11 }}>
-              <div style={{ fontSize: 9, color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>⚡ Réécrire avec l'IA</div>
-              <div style={{ display: "flex", gap: 7 }}>
-                <input value={aiPrompt} onChange={e => setAiPrompt(e.target.value)} onKeyDown={e => e.key === "Enter" && improveAI()} placeholder='Ex: "plus court et percutant", "offre démo gratuite", "ton urgent"...' style={{ flex: 1, background: "#080810", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 11px", borderRadius: 5, fontSize: 10 }} />
-                <button onClick={improveAI} disabled={aiLoading} className="ab" style={{ background: aiLoading ? "#141420" : "#d4a853", border: "none", color: aiLoading ? "#444" : "#080810", padding: "6px 14px", borderRadius: 5, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
-                  {aiLoading ? <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⌛</span> : "Générer"}
+
+            {/* IA */}
+            <div style={{ ...styles.card, borderColor: hasClaude ? "#e0e7ff" : "#e5e7eb" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 10 }}>
+                ✨ Réécrire avec l'IA (Claude)
+                {!hasClaude && <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400, marginLeft: 8 }}>— Clé API requise dans la config</span>}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && improveAI()}
+                  placeholder='Ex : "plus court", "ton urgent", "ajouter une offre démo gratuite"…'
+                  disabled={!hasClaude}
+                  style={{ ...styles.input, flex: 1 }}
+                />
+                <button
+                  onClick={improveAI}
+                  disabled={aiLoading || !hasClaude || !aiPrompt.trim()}
+                  className="btn-hover"
+                  style={{ ...styles.btn, background: hasClaude && aiPrompt.trim() && !aiLoading ? "#6366f1" : "#e5e7eb", color: hasClaude && aiPrompt.trim() && !aiLoading ? "#fff" : "#9ca3af", whiteSpace: "nowrap" }}
+                >
+                  {aiLoading ? <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>↻</span> : "Générer"}
                 </button>
               </div>
             </div>
+
             {selAgencies.length > 0 && (
-              <div style={{ background: "#0a100a", border: "1px solid #142014", borderRadius: 7, padding: 11 }}>
-                <div style={{ fontSize: 9, color: "#3a5a3a", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>👁 Aperçu → {selAgencies[0].nom}</div>
-                <div style={{ fontSize: 10, color: "#5a8a5a", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 130, overflow: "auto" }}>{personalize(tpl, selAgencies[0])}</div>
+              <div style={{ ...styles.card, borderColor: "#d1fae5", background: "#f0fdf4" }}>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Aperçu pour {selAgencies[0].nom}</div>
+                <pre style={{ fontSize: 12, color: "#065f46", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto", fontFamily: "system-ui, sans-serif" }}>
+                  {personalize(tpl, selAgencies[0])}
+                </pre>
               </div>
             )}
           </div>
 
-          {/* Panel droite */}
-          <div style={{ width: 260, display: "flex", flexDirection: "column", gap: 11 }}>
-            <div style={{ background: "#0d0d1c", border: "1px solid #1c1c2c", borderRadius: 7, padding: 13 }}>
-              <div style={{ fontSize: 9, color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>Quota aujourd'hui</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                <QBar label="BREVO" used={sentToday.brevo} max={QUOTAS.brevo} color="#10b981" />
-                <QBar label="RESEND" used={sentToday.resend} max={QUOTAS.resend} color="#5a8fd4" />
+          {/* Colonne droite */}
+          <div style={{ width: 270, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={styles.card}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 12 }}>Quota aujourd'hui</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <QuotaBar label="Brevo" used={sentToday.brevo} max={QUOTAS.brevo} color="#16a34a" />
+                <QuotaBar label="Resend" used={sentToday.resend} max={QUOTAS.resend} color="#6366f1" />
               </div>
-              <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px solid #12122a", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 9, color: "#444" }}>Total restant</span>
-                <span style={{ fontSize: 22, fontFamily: "Syne,sans-serif", fontWeight: 800, color: totalQ > 0 ? "#d4a853" : "#ef4444" }}>{totalQ}</span>
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>Total restant</span>
+                <span style={{ fontSize: 28, fontWeight: 800, color: totalQ > 0 ? "#6366f1" : "#dc2626" }}>{totalQ}</span>
               </div>
-              {!hasKey && <div style={{ fontSize: 9, color: "#ef444466", textAlign: "center", marginTop: 6 }}>⚠️ Config APIs requis</div>}
             </div>
 
-            <div style={{ background: "#0d0d1c", border: "1px solid #1c1c2c", borderRadius: 7, padding: 13, flex: 1 }}>
-              <div style={{ fontSize: 9, color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 9 }}>Destinataires {selected.size > 0 ? `(${selected.size})` : ""}</div>
+            <div style={{ ...styles.card, flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 10 }}>
+                Destinataires {selected.size > 0 ? `(${selected.size})` : ""}
+              </div>
               {!selected.size ? (
-                <div style={{ color: "#1e1e28", fontSize: 10, textAlign: "center", padding: "18px 0" }}>Aucune agence sélectionnée<br /><span style={{ fontSize: 9 }}>→ Onglet "Base Agences"</span></div>
+                <div style={{ color: "#9ca3af", fontSize: 12, textAlign: "center", padding: "20px 0", lineHeight: 1.7 }}>
+                  Aucune agence sélectionnée.<br />
+                  <span style={{ color: "#6366f1", cursor: "pointer" }} onClick={() => setTab("liste")}>→ Aller à la liste</span>
+                </div>
               ) : (
-                <div style={{ maxHeight: 180, overflow: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ maxHeight: 200, overflow: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
                   {selAgencies.map(a => (
-                    <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 7px", background: "#0a0a14", borderRadius: 4 }}>
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "#f9fafb", borderRadius: 6 }}>
                       <Badge cat={a.categorie} />
                       <div style={{ flex: 1, overflow: "hidden" }}>
-                        <div style={{ fontSize: 10, color: "#bbb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nom}</div>
-                        <div style={{ fontSize: 9, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.email}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nom}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.email}</div>
                       </div>
                     </div>
                   ))}
@@ -454,31 +707,44 @@ export default function App() {
               )}
             </div>
 
-            <button onClick={handleSend} disabled={sending || !selected.size || !hasKey} style={{ background: (selected.size && hasKey && !sending) ? "linear-gradient(135deg,#d4a853,#7a5215)" : "#111", border: "none", color: (selected.size && hasKey) ? "#080810" : "#2a2a38", padding: "13px", borderRadius: 7, fontSize: 12, fontWeight: 700, fontFamily: "Syne,sans-serif" }}>
-              {sending ? `⏳ ${progress}%` : `🚀 Envoyer${selected.size ? ` (${selected.size})` : ""}`}
+            <button
+              onClick={handleSend}
+              disabled={sending || !selected.size || !hasKey}
+              className="btn-hover"
+              style={{
+                ...styles.btn, padding: "13px", fontSize: 14, fontWeight: 700,
+                background: selected.size && hasKey && !sending ? "#6366f1" : "#e5e7eb",
+                color: selected.size && hasKey && !sending ? "#fff" : "#9ca3af",
+              }}
+            >
+              {sending ? `Envoi en cours… ${progress}%` : `Envoyer${selected.size ? ` (${selected.size})` : ""}`}
             </button>
 
             {sending && (
-              <div style={{ height: 3, background: "#141420", borderRadius: 2, overflow: "hidden" }}>
-                <div style={{ width: progress + "%", height: "100%", background: "linear-gradient(90deg,#d4a853,#10b981)", transition: "width .3s" }} />
+              <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ width: progress + "%", height: "100%", background: "#6366f1", borderRadius: 4, transition: "width .3s" }} />
               </div>
             )}
 
             {log.length > 0 && (
-              <div style={{ background: "#0a0a14", border: "1px solid #12122a", borderRadius: 7, padding: 11, maxHeight: 200, overflow: "auto" }}>
-                <div style={{ fontSize: 9, color: "#444", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>{done ? "✅ Résultats" : "⏳ En cours"}</div>
+              <div style={{ ...styles.card, maxHeight: 220, overflow: "auto" }}>
+                <div style={{ fontWeight: 600, fontSize: 12, color: "#374151", marginBottom: 8 }}>
+                  {done ? "Résultats" : "En cours…"}
+                </div>
                 {log.map((l, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 0", borderBottom: "1px solid #0c0c18", fontSize: 10 }}>
-                    <span style={{ color: l.status === "envoyé" ? "#10b981" : l.status === "quota_atteint" ? "#d4a853" : "#ef4444", fontSize: 11 }}>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderBottom: "1px solid #f3f4f6", fontSize: 12 }}>
+                    <span style={{ color: l.status === "envoyé" ? "#16a34a" : l.status === "quota_atteint" ? "#f59e0b" : "#dc2626", fontWeight: 700 }}>
                       {l.status === "envoyé" ? "✓" : l.status === "quota_atteint" ? "⏸" : "✕"}
                     </span>
-                    <span style={{ flex: 1, color: "#777", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10 }}>{l.nom}</span>
-                    <span style={{ fontSize: 9, color: l.provider === "brevo" ? "#10b98166" : l.provider === "resend" ? "#5a8fd466" : "#333" }}>{l.provider !== "-" ? l.provider : l.status}</span>
+                    <span style={{ flex: 1, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nom}</span>
+                    <span style={{ fontSize: 10, color: "#9ca3af" }}>{l.provider !== "-" ? l.provider : l.status}</span>
                   </div>
                 ))}
                 {done && (
-                  <div style={{ marginTop: 7, fontSize: 9, color: "#444", textAlign: "center" }}>
-                    {log.filter(l => l.status === "envoyé").length} ✓ · {log.filter(l => l.status === "erreur").length} ✕ · {log.filter(l => l.status === "quota_atteint").length} quota
+                  <div style={{ marginTop: 8, fontSize: 11, color: "#6b7280", display: "flex", gap: 10 }}>
+                    <span style={{ color: "#16a34a" }}>{log.filter(l => l.status === "envoyé").length} envoyés</span>
+                    <span style={{ color: "#dc2626" }}>{log.filter(l => l.status === "erreur").length} erreurs</span>
+                    <span style={{ color: "#f59e0b" }}>{log.filter(l => l.status === "quota_atteint").length} quota</span>
                   </div>
                 )}
               </div>
@@ -487,32 +753,50 @@ export default function App() {
         </div>
       )}
 
-      {/* ══ IMPORT ══ */}
+      {/* ══════════════════════ TAB: IMPORT ══════════════════════ */}
       {tab === "import" && (
-        <div style={{ flex: 1, overflow: "auto", padding: "18px 22px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, maxWidth: 900 }}>
+        <div style={{ overflow: "auto", padding: "20px 24px", height: "calc(100vh - 185px)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, maxWidth: 960 }}>
             <div>
-              <div style={{ color: "#d4a853", fontFamily: "Syne,sans-serif", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>📥 Import CSV</div>
-              <div style={{ background: "#0d0d1c", border: "1px solid #1c1c2c", borderRadius: 7, padding: 11, marginBottom: 11 }}>
-                <div style={{ fontSize: 10, color: "#666", marginBottom: 6 }}>Format (séparateur <span style={{ color: "#d4a853" }}>;</span>) :</div>
-                <div style={{ background: "#080810", borderRadius: 4, padding: 8, fontSize: 10, color: "#333", fontFamily: "monospace", lineHeight: 1.6 }}>Nom;email;tél;ville;région;catégorie</div>
-                <div style={{ fontSize: 9, color: "#222", marginTop: 5 }}>Catégories : {CATEGORIES.join(", ")}</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 14 }}>Importer un CSV</div>
+              <div style={{ ...styles.card, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, color: "#374151", marginBottom: 8, fontWeight: 600 }}>Format attendu (séparateur <code style={{ background: "#f3f4f6", padding: "1px 4px", borderRadius: 3 }}>;</code>)</div>
+                <code style={{ display: "block", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "10px 12px", fontSize: 11, color: "#374151", lineHeight: 1.8 }}>
+                  Nom;email;téléphone;ville;région;catégorie<br />
+                  <span style={{ color: "#9ca3af" }}>AutoLoc Paris;contact@autoloc.fr;01 42 00 00 00;Paris;Île-de-France;Voiture</span>
+                </code>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8 }}>
+                  Catégories acceptées : {CATEGORIES.join(", ")}
+                </div>
               </div>
-              <textarea value={importText} onChange={e => setImportText(e.target.value)} rows={9} placeholder={"AutoLoc Paris;contact@autoloc.fr;01 42 00 00 00;Paris;Île-de-France;Voiture"} style={{ width: "100%", background: "#0d0d18", border: "1px solid #1c1c28", color: "#ddd", padding: "9px 11px", borderRadius: 5, fontSize: 10, lineHeight: 1.7, resize: "vertical", marginBottom: 9 }} />
-              <button onClick={doImport} disabled={!importText.trim()} className="ab" style={{ background: importText.trim() ? "#d4a853" : "#111", border: "none", color: importText.trim() ? "#080810" : "#2a2a38", padding: "8px 18px", borderRadius: 5, fontSize: 10, fontWeight: 700 }}>Importer</button>
+              <textarea
+                value={importText} onChange={e => setImportText(e.target.value)}
+                rows={10}
+                placeholder={"AutoLoc Paris;contact@autoloc.fr;01 42 00 00 00;Paris;Île-de-France;Voiture\nLuxury Drive Cannes;booking@luxurydrive.com;04 93 12 34 56;Cannes;PACA;Luxe"}
+                style={{ ...styles.input, lineHeight: 1.7, resize: "vertical", fontFamily: "monospace", fontSize: 12, marginBottom: 10 }}
+              />
+              <button
+                onClick={doImport}
+                disabled={!importText.trim()}
+                className="btn-hover"
+                style={{ ...styles.btn, background: importText.trim() ? "#6366f1" : "#e5e7eb", color: importText.trim() ? "#fff" : "#9ca3af" }}
+              >
+                Importer les agences
+              </button>
             </div>
+
             <div>
-              <div style={{ color: "#d4a853", fontFamily: "Syne,sans-serif", fontWeight: 700, fontSize: 13, marginBottom: 12 }}>🔎 Où trouver les agences</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginBottom: 14 }}>Où trouver des agences</div>
               {[
-                { t: "Pappers.fr / Societe.com", d: "Code NAF 7711Z (voitures), 7712Z (utilitaires) → export CSV gratuit avec emails", c: "#10b981" },
-                { t: "Google Maps + Outscraper", d: '"agence location voiture [ville]" → Outscraper.com extrait nom/tel/email auto', c: "#5a8fd4" },
-                { t: "Pages Jaunes + Apify", d: '"Location de véhicules" → acteur Apify Pages Jaunes → export CSV/Excel', c: "#d4a853" },
-                { t: "LinkedIn Sales Navigator", d: '"Location de véhicules" + France → export via Phantombuster ou Evaboot', c: "#8b5cf6" },
-                { t: "INPI / Data.gouv.fr", d: "Base SIRENE officielle filtrable par NAF — 100% des entreprises françaises", c: "#ef4444" },
+                { t: "Pappers.fr / Societe.com", d: "Code NAF 7711Z (voitures), 7712Z (utilitaires) → export CSV gratuit avec emails.", color: "#16a34a" },
+                { t: "Google Maps + Outscraper", d: '"agence location voiture [ville]" → Outscraper.com extrait nom / tél / email automatiquement.', color: "#6366f1" },
+                { t: "Pages Jaunes + Apify", d: '"Location de véhicules" → acteur Apify Pages Jaunes → export CSV/Excel direct.', color: "#f59e0b" },
+                { t: "LinkedIn Sales Navigator", d: '"Location de véhicules" + France → export via Phantombuster ou Evaboot.', color: "#8b5cf6" },
+                { t: "INPI / Data.gouv.fr (SIRENE)", d: "Base officielle de toutes les entreprises françaises, filtrable par code NAF — 100% gratuit.", color: "#dc2626" },
               ].map(s => (
-                <div key={s.t} style={{ background: "#0d0d1c", border: `1px solid ${s.c}1a`, borderRadius: 6, padding: 9, marginBottom: 7 }}>
-                  <div style={{ fontSize: 11, color: s.c, fontWeight: 600, marginBottom: 3 }}>{s.t}</div>
-                  <div style={{ fontSize: 10, color: "#444", lineHeight: 1.5 }}>{s.d}</div>
+                <div key={s.t} style={{ ...styles.card, marginBottom: 10, borderLeft: `4px solid ${s.color}` }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", marginBottom: 4 }}>{s.t}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>{s.d}</div>
                 </div>
               ))}
             </div>
@@ -520,37 +804,48 @@ export default function App() {
         </div>
       )}
 
-      {/* ══ MODAL AJOUT ══ */}
+      {/* ══════════════════════ MODAL: AJOUT ══════════════════════ */}
       {showAdd && (
-        <div style={{ position: "fixed", inset: 0, background: "#000000bb", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }} onClick={() => setShowAdd(false)}>
-          <div style={{ background: "#0d0d1c", border: "1px solid #22223a", borderRadius: 10, padding: 20, width: 400, animation: "slideIn .2s ease" }} onClick={e => e.stopPropagation()}>
-            <div style={{ color: "#d4a853", fontFamily: "Syne,sans-serif", fontWeight: 700, fontSize: 13, marginBottom: 13 }}>+ Nouvelle Agence</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
-              {[["nom", "Nom *"], ["email", "Email *"], ["tel", "Téléphone"], ["ville", "Ville"]].map(([f, l]) => (
-                <div key={f}>
-                  <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{l}</div>
-                  <input value={newA[f]} onChange={e => setNewA(p => ({ ...p, [f]: e.target.value }))} style={{ width: "100%", background: "#080810", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 9px", borderRadius: 4, fontSize: 10 }} />
-                </div>
-              ))}
-              {[["region", "Région", REGIONS], ["categorie", "Catégorie", CATEGORIES]].map(([f, l, opts]) => (
-                <div key={f}>
-                  <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{l}</div>
-                  <select value={newA[f]} onChange={e => setNewA(p => ({ ...p, [f]: e.target.value }))} style={{ width: "100%", background: "#080810", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 9px", borderRadius: 4, fontSize: 10 }}>
-                    {opts.map(o => <option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-            <div style={{ marginTop: 9 }}>
-              <div style={{ fontSize: 9, color: "#333", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Notes</div>
-              <textarea value={newA.notes} onChange={e => setNewA(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ width: "100%", background: "#080810", border: "1px solid #1c1c28", color: "#ddd", padding: "6px 9px", borderRadius: 4, fontSize: 10, resize: "none" }} />
-            </div>
-            <div style={{ display: "flex", gap: 7, marginTop: 13, justifyContent: "flex-end" }}>
-              <button onClick={() => setShowAdd(false)} style={{ background: "#141420", border: "1px solid #22222e", color: "#666", padding: "6px 13px", borderRadius: 5, fontSize: 10 }}>Annuler</button>
-              <button onClick={addAgency} style={{ background: "#d4a853", border: "none", color: "#080810", padding: "6px 16px", borderRadius: 5, fontSize: 10, fontWeight: 700 }}>Ajouter</button>
-            </div>
+        <Modal title="Nouvelle agence" onClose={() => setShowAdd(false)}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {[["nom", "Nom *"], ["email", "Email *"], ["tel", "Téléphone"], ["ville", "Ville"]].map(([f, l]) => (
+              <div key={f}>
+                <label style={styles.label}>{l}</label>
+                <input
+                  value={newA[f]}
+                  onChange={e => setNewA(p => ({ ...p, [f]: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && addAgency()}
+                  style={styles.input}
+                />
+              </div>
+            ))}
+            {[["region", "Région", REGIONS], ["categorie", "Catégorie", CATEGORIES]].map(([f, l, opts]) => (
+              <div key={f}>
+                <label style={styles.label}>{l}</label>
+                <select value={newA[f]} onChange={e => setNewA(p => ({ ...p, [f]: e.target.value }))} style={{ ...styles.select, width: "100%" }}>
+                  {opts.map(o => <option key={o}>{o}</option>)}
+                </select>
+              </div>
+            ))}
           </div>
-        </div>
+          <div style={{ marginTop: 12 }}>
+            <label style={styles.label}>Notes</label>
+            <textarea
+              value={newA.notes}
+              onChange={e => setNewA(p => ({ ...p, notes: e.target.value }))}
+              rows={2}
+              style={{ ...styles.input, resize: "none" }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 18, justifyContent: "flex-end" }}>
+            <button onClick={() => setShowAdd(false)} className="btn-hover" style={{ ...styles.btn, background: "#f9fafb", border: "1px solid #e5e7eb", color: "#374151" }}>
+              Annuler
+            </button>
+            <button onClick={addAgency} disabled={!newA.nom || !newA.email} className="btn-hover" style={{ ...styles.btn, background: newA.nom && newA.email ? "#6366f1" : "#e5e7eb", color: newA.nom && newA.email ? "#fff" : "#9ca3af" }}>
+              Ajouter l'agence
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );
