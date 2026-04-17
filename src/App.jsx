@@ -173,6 +173,14 @@ export default function App() {
   const [sortD, setSortD] = useState("asc");
   const abortRef = useRef(false);
 
+  const [sendMode, setSendMode] = useState("transactionnel");
+  const [campaignName, setCampaignName] = useState("LocPro — Campagne " + new Date().toLocaleDateString("fr-FR"));
+  const [listName, setListName] = useState("LocPro Export " + new Date().toLocaleDateString("fr-FR"));
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [campaignSteps, setCampaignSteps] = useState([]);
+  const [campaignRunning, setCampaignRunning] = useState(false);
+  const [campaignDone, setCampaignDone] = useState(false);
+
   const hasBrevo = !!brevoKey.trim();
   const hasResend = !!resendKey.trim();
   const hasClaude = !!claudeKey.trim();
@@ -327,6 +335,129 @@ export default function App() {
       await new Promise(r => setTimeout(r, 250));
     }
     setSending(false); setDone(true); setSelected(new Set());
+  };
+
+  const textToHtml = (text) => {
+    const lines = text.split("\n");
+    let html = "";
+    let inList = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("•") || trimmed.startsWith("-")) {
+        if (!inList) { html += "<ul style='margin:10px 0 10px 20px;'>"; inList = true; }
+        html += `<li style='margin-bottom:4px;'>${trimmed.replace(/^[•\-]\s*/, "")}</li>`;
+      } else {
+        if (inList) { html += "</ul>"; inList = false; }
+        if (!trimmed) { html += "<br>"; }
+        else {
+          const linked = trimmed.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" style="color:#6366f1;">$1</a>');
+          html += `<p style='margin:0 0 8px 0;'>${linked}</p>`;
+        }
+      }
+    }
+    if (inList) html += "</ul>";
+    return `<div style='font-family:Arial,sans-serif;font-size:14px;line-height:1.7;color:#111827;max-width:600px;margin:0 auto;padding:32px 24px;'>${html}</div>`;
+  };
+
+  const tplToBrevo = (text) =>
+    text
+      .replace(/\{NOM_AGENCE\}/g, "{{ contact.NOM_AGENCE }}")
+      .replace(/\{CATEGORIE\}/g, "{{ contact.CATEGORIE }}")
+      .replace(/\{VILLE\}/g, "{{ contact.VILLE }}")
+      .replace(/\{REGION\}/g, "{{ contact.REGION }}");
+
+  const addStep = (label, status, detail = "") =>
+    setCampaignSteps(prev => [...prev, { label, status, detail, time: new Date().toLocaleTimeString("fr-FR") }]);
+
+  const updateLastStep = (status, detail = "") =>
+    setCampaignSteps(prev => prev.map((s, i) => i === prev.length - 1 ? { ...s, status, detail } : s));
+
+  const handleBrevoKampaign = async () => {
+    if (!selAgencies.length || !hasBrevo) return;
+    setCampaignRunning(true);
+    setCampaignDone(false);
+    setCampaignSteps([]);
+
+    const headers = { "Content-Type": "application/json", "api-key": brevoKey };
+
+    try {
+      addStep("Import des contacts dans Brevo", "loading", `${selAgencies.length} contacts en cours…`);
+      let failedContacts = 0;
+      for (const agency of selAgencies) {
+        try {
+          await fetch("https://api.brevo.com/v3/contacts", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              email: agency.email,
+              attributes: {
+                PRENOM: agency.nom,
+                NOM_AGENCE: agency.nom,
+                VILLE: agency.ville,
+                CATEGORIE: agency.categorie,
+                REGION: agency.region,
+              },
+              updateEnabled: true,
+            }),
+          });
+        } catch { failedContacts++; }
+      }
+      updateLastStep("ok", `${selAgencies.length - failedContacts} importés${failedContacts ? `, ${failedContacts} ignorés` : ""}`);
+
+      addStep("Création de la liste", "loading", listName);
+      const listRes = await fetch("https://api.brevo.com/v3/contacts/lists", {
+        method: "POST", headers,
+        body: JSON.stringify({ name: listName, folderId: 1 }),
+      });
+      if (!listRes.ok) {
+        const e = await listRes.json();
+        throw new Error(e.message || "Impossible de créer la liste");
+      }
+      const listData = await listRes.json();
+      const listId = listData.id;
+      updateLastStep("ok", `Liste #${listId} créée`);
+
+      addStep("Ajout des contacts à la liste", "loading");
+      const addRes = await fetch(`https://api.brevo.com/v3/contacts/lists/${listId}/contacts/add`, {
+        method: "POST", headers,
+        body: JSON.stringify({ emails: selAgencies.map(a => a.email) }),
+      });
+      if (!addRes.ok) {
+        const e = await addRes.json();
+        throw new Error(e.message || "Impossible d'ajouter les contacts");
+      }
+      updateLastStep("ok", `${selAgencies.length} contacts ajoutés`);
+
+      addStep("Création de la campagne Brevo", "loading", campaignName);
+      const htmlContent = textToHtml(tplToBrevo(tpl));
+      const campaignBody = {
+        name: campaignName,
+        subject,
+        sender: { name: senderName, email: senderEmail },
+        type: "classic",
+        htmlContent,
+        recipients: { listIds: [listId] },
+      };
+      if (scheduledAt) campaignBody.scheduledAt = scheduledAt;
+
+      const campRes = await fetch("https://api.brevo.com/v3/emailCampaigns", {
+        method: "POST", headers,
+        body: JSON.stringify(campaignBody),
+      });
+      if (!campRes.ok) {
+        const e = await campRes.json();
+        throw new Error(e.message || "Impossible de créer la campagne");
+      }
+      const campData = await campRes.json();
+      updateLastStep("ok", `Campagne #${campData.id} créée${scheduledAt ? " — programmée pour " + scheduledAt : " — en attente d'envoi"}`);
+
+      setAgencies(p => p.map(a => selected.has(a.id) ? { ...a, prospecte: true } : a));
+      setSelected(new Set());
+      setCampaignDone(true);
+    } catch (err) {
+      updateLastStep("error", err.message);
+    }
+    setCampaignRunning(false);
   };
 
   const stats = {
@@ -611,24 +742,52 @@ export default function App() {
       {/* ══════════════════════ TAB: MAIL ══════════════════════ */}
       {tab === "mail" && (
         <div style={{ flex: 1, overflow: "auto", padding: "20px 24px", display: "flex", gap: 20, height: "calc(100vh - 185px)" }}>
-          {/* Colonne gauche */}
+
+          {/* ── Colonne gauche ── */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>
+
+            {/* Sélecteur de mode */}
+            <div style={{ display: "flex", gap: 0, background: "#f3f4f6", borderRadius: 9, padding: 3, width: "fit-content" }}>
+              {[
+                { k: "transactionnel", label: "📤 Email transactionnel", desc: "1 email par contact · Brevo ou Resend" },
+                { k: "campagne", label: "📣 Campagne Brevo", desc: "Import liste + campagne planifiable" },
+              ].map(m => (
+                <button
+                  key={m.k}
+                  onClick={() => setSendMode(m.k)}
+                  style={{
+                    padding: "7px 18px", border: "none", borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: "pointer",
+                    background: sendMode === m.k ? "#fff" : "transparent",
+                    color: sendMode === m.k ? "#6366f1" : "#6b7280",
+                    boxShadow: sendMode === m.k ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
+                    transition: "all .15s",
+                  }}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Modèle commun */}
             <div style={styles.card}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 14 }}>Modèle d'email</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 14 }}>Contenu de l'email</div>
               <div style={{ marginBottom: 12 }}>
-                <label style={styles.label}>Objet de l'email</label>
+                <label style={styles.label}>Objet</label>
                 <input value={subject} onChange={e => setSubject(e.target.value)} style={styles.input} />
               </div>
               <div>
                 <label style={styles.label}>
-                  Corps —{" "}
-                  <span style={{ color: "#6366f1" }}>{"{NOM_AGENCE}"}</span>{" · "}
-                  <span style={{ color: "#16a34a" }}>{"{CATEGORIE}"}</span>{" · "}
-                  <span style={{ color: "#f59e0b" }}>{"{VILLE}"}</span>
+                  Corps du message —{" "}
+                  <span style={{ color: "#6366f1", fontWeight: 700 }}>{"{NOM_AGENCE}"}</span>
+                  {" · "}
+                  <span style={{ color: "#16a34a", fontWeight: 700 }}>{"{CATEGORIE}"}</span>
+                  {" · "}
+                  <span style={{ color: "#f59e0b", fontWeight: 700 }}>{"{VILLE}"}</span>
+                  <span style={{ color: "#9ca3af", fontWeight: 400, marginLeft: 6 }}>(variables de personnalisation)</span>
                 </label>
                 <textarea
                   value={tpl} onChange={e => setTpl(e.target.value)}
-                  rows={12}
+                  rows={11}
                   style={{ ...styles.input, lineHeight: 1.7, resize: "vertical", fontFamily: "monospace", fontSize: 12 }}
                 />
               </div>
@@ -637,14 +796,14 @@ export default function App() {
             {/* IA */}
             <div style={{ ...styles.card, borderColor: hasClaude ? "#e0e7ff" : "#e5e7eb" }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#111827", marginBottom: 10 }}>
-                ✨ Réécrire avec l'IA (Claude)
-                {!hasClaude && <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400, marginLeft: 8 }}>— Clé API requise dans la config</span>}
+                ✨ Réécrire avec Claude (IA)
+                {!hasClaude && <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400, marginLeft: 8 }}>— Clé Anthropic requise dans la config</span>}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   value={aiPrompt} onChange={e => setAiPrompt(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && improveAI()}
-                  placeholder='Ex : "plus court", "ton urgent", "ajouter une offre démo gratuite"…'
+                  placeholder='Ex : "plus court et percutant", "ajouter une offre démo gratuite", "ton urgent"…'
                   disabled={!hasClaude}
                   style={{ ...styles.input, flex: 1 }}
                 />
@@ -661,7 +820,9 @@ export default function App() {
 
             {selAgencies.length > 0 && (
               <div style={{ ...styles.card, borderColor: "#d1fae5", background: "#f0fdf4" }}>
-                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Aperçu pour {selAgencies[0].nom}</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8, fontWeight: 600 }}>
+                  Aperçu — {selAgencies[0].nom}
+                </div>
                 <pre style={{ fontSize: 12, color: "#065f46", lineHeight: 1.7, whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto", fontFamily: "system-ui, sans-serif" }}>
                   {personalize(tpl, selAgencies[0])}
                 </pre>
@@ -669,33 +830,23 @@ export default function App() {
             )}
           </div>
 
-          {/* Colonne droite */}
-          <div style={{ width: 270, display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={styles.card}>
-              <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 12 }}>Quota aujourd'hui</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <QuotaBar label="Brevo" used={sentToday.brevo} max={QUOTAS.brevo} color="#16a34a" />
-                <QuotaBar label="Resend" used={sentToday.resend} max={QUOTAS.resend} color="#6366f1" />
-              </div>
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#6b7280" }}>Total restant</span>
-                <span style={{ fontSize: 28, fontWeight: 800, color: totalQ > 0 ? "#6366f1" : "#dc2626" }}>{totalQ}</span>
-              </div>
-            </div>
+          {/* ── Colonne droite ── */}
+          <div style={{ width: 290, display: "flex", flexDirection: "column", gap: 14 }}>
 
-            <div style={{ ...styles.card, flex: 1 }}>
+            {/* Destinataires */}
+            <div style={{ ...styles.card, flex: selected.size > 4 ? 1 : "none" }}>
               <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 10 }}>
                 Destinataires {selected.size > 0 ? `(${selected.size})` : ""}
               </div>
               {!selected.size ? (
-                <div style={{ color: "#9ca3af", fontSize: 12, textAlign: "center", padding: "20px 0", lineHeight: 1.7 }}>
+                <div style={{ color: "#9ca3af", fontSize: 12, textAlign: "center", padding: "16px 0", lineHeight: 1.8 }}>
                   Aucune agence sélectionnée.<br />
-                  <span style={{ color: "#6366f1", cursor: "pointer" }} onClick={() => setTab("liste")}>→ Aller à la liste</span>
+                  <span style={{ color: "#6366f1", cursor: "pointer", fontWeight: 600 }} onClick={() => setTab("liste")}>→ Aller à la liste</span>
                 </div>
               ) : (
-                <div style={{ maxHeight: 200, overflow: "auto", display: "flex", flexDirection: "column", gap: 5 }}>
+                <div style={{ maxHeight: 180, overflow: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
                   {selAgencies.map(a => (
-                    <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", background: "#f9fafb", borderRadius: 6 }}>
+                    <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 7px", background: "#f9fafb", borderRadius: 6 }}>
                       <Badge cat={a.categorie} />
                       <div style={{ flex: 1, overflow: "hidden" }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.nom}</div>
@@ -707,47 +858,147 @@ export default function App() {
               )}
             </div>
 
-            <button
-              onClick={handleSend}
-              disabled={sending || !selected.size || !hasKey}
-              className="btn-hover"
-              style={{
-                ...styles.btn, padding: "13px", fontSize: 14, fontWeight: 700,
-                background: selected.size && hasKey && !sending ? "#6366f1" : "#e5e7eb",
-                color: selected.size && hasKey && !sending ? "#fff" : "#9ca3af",
-              }}
-            >
-              {sending ? `Envoi en cours… ${progress}%` : `Envoyer${selected.size ? ` (${selected.size})` : ""}`}
-            </button>
-
-            {sending && (
-              <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ width: progress + "%", height: "100%", background: "#6366f1", borderRadius: 4, transition: "width .3s" }} />
-              </div>
-            )}
-
-            {log.length > 0 && (
-              <div style={{ ...styles.card, maxHeight: 220, overflow: "auto" }}>
-                <div style={{ fontWeight: 600, fontSize: 12, color: "#374151", marginBottom: 8 }}>
-                  {done ? "Résultats" : "En cours…"}
-                </div>
-                {log.map((l, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderBottom: "1px solid #f3f4f6", fontSize: 12 }}>
-                    <span style={{ color: l.status === "envoyé" ? "#16a34a" : l.status === "quota_atteint" ? "#f59e0b" : "#dc2626", fontWeight: 700 }}>
-                      {l.status === "envoyé" ? "✓" : l.status === "quota_atteint" ? "⏸" : "✕"}
-                    </span>
-                    <span style={{ flex: 1, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nom}</span>
-                    <span style={{ fontSize: 10, color: "#9ca3af" }}>{l.provider !== "-" ? l.provider : l.status}</span>
+            {/* ═══ MODE TRANSACTIONNEL ═══ */}
+            {sendMode === "transactionnel" && (
+              <>
+                <div style={styles.card}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: "#374151", marginBottom: 12 }}>Quota du jour</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <QuotaBar label="Brevo" used={sentToday.brevo} max={QUOTAS.brevo} color="#16a34a" />
+                    <QuotaBar label="Resend" used={sentToday.resend} max={QUOTAS.resend} color="#6366f1" />
                   </div>
-                ))}
-                {done && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: "#6b7280", display: "flex", gap: 10 }}>
-                    <span style={{ color: "#16a34a" }}>{log.filter(l => l.status === "envoyé").length} envoyés</span>
-                    <span style={{ color: "#dc2626" }}>{log.filter(l => l.status === "erreur").length} erreurs</span>
-                    <span style={{ color: "#f59e0b" }}>{log.filter(l => l.status === "quota_atteint").length} quota</span>
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #f3f4f6", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>Total restant</span>
+                    <span style={{ fontSize: 28, fontWeight: 800, color: totalQ > 0 ? "#6366f1" : "#dc2626" }}>{totalQ}</span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleSend}
+                  disabled={sending || !selected.size || !hasKey}
+                  className="btn-hover"
+                  style={{
+                    ...styles.btn, padding: "13px", fontSize: 14, fontWeight: 700,
+                    background: selected.size && hasKey && !sending ? "#6366f1" : "#e5e7eb",
+                    color: selected.size && hasKey && !sending ? "#fff" : "#9ca3af",
+                  }}
+                >
+                  {sending ? `Envoi… ${progress}%` : `Envoyer maintenant${selected.size ? ` (${selected.size})` : ""}`}
+                </button>
+
+                {sending && (
+                  <div style={{ height: 6, background: "#e5e7eb", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ width: progress + "%", height: "100%", background: "#6366f1", borderRadius: 4, transition: "width .3s" }} />
                   </div>
                 )}
-              </div>
+
+                {log.length > 0 && (
+                  <div style={{ ...styles.card, maxHeight: 200, overflow: "auto" }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: "#374151", marginBottom: 8 }}>{done ? "Résultats" : "En cours…"}</div>
+                    {log.map((l, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0", borderBottom: "1px solid #f3f4f6", fontSize: 12 }}>
+                        <span style={{ color: l.status === "envoyé" ? "#16a34a" : l.status === "quota_atteint" ? "#f59e0b" : "#dc2626", fontWeight: 700 }}>
+                          {l.status === "envoyé" ? "✓" : l.status === "quota_atteint" ? "⏸" : "✕"}
+                        </span>
+                        <span style={{ flex: 1, color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.nom}</span>
+                        <span style={{ fontSize: 10, color: "#9ca3af" }}>{l.provider !== "-" ? l.provider : l.status}</span>
+                      </div>
+                    ))}
+                    {done && (
+                      <div style={{ marginTop: 8, fontSize: 11, color: "#6b7280", display: "flex", gap: 10 }}>
+                        <span style={{ color: "#16a34a" }}>{log.filter(l => l.status === "envoyé").length} envoyés</span>
+                        <span style={{ color: "#dc2626" }}>{log.filter(l => l.status === "erreur").length} erreurs</span>
+                        <span style={{ color: "#f59e0b" }}>{log.filter(l => l.status === "quota_atteint").length} quota</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ═══ MODE CAMPAGNE BREVO ═══ */}
+            {sendMode === "campagne" && (
+              <>
+                <div style={styles.card}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#111827", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ background: "#fef3c7", color: "#92400e", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700 }}>BREVO</span>
+                    Paramètres de la campagne
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                      <label style={styles.label}>Nom de la campagne</label>
+                      <input value={campaignName} onChange={e => setCampaignName(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <label style={styles.label}>Nom de la liste Brevo à créer</label>
+                      <input value={listName} onChange={e => setListName(e.target.value)} style={styles.input} />
+                    </div>
+                    <div>
+                      <label style={styles.label}>
+                        Envoi planifié <span style={{ color: "#9ca3af", fontWeight: 400 }}>(facultatif — laisser vide = envoi immédiat)</span>
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={scheduledAt}
+                        onChange={e => setScheduledAt(e.target.value)}
+                        style={styles.input}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 14, padding: "10px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 7, fontSize: 11, color: "#92400e", lineHeight: 1.6 }}>
+                    <strong>Étapes automatiques :</strong><br />
+                    1. Import des contacts avec attributs (NOM_AGENCE, VILLE, CATEGORIE)<br />
+                    2. Création d'une liste Brevo dédiée<br />
+                    3. Création de la campagne avec HTML personnalisé
+                  </div>
+                </div>
+
+                {!hasBrevo && (
+                  <div style={{ padding: "12px 14px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 12, color: "#dc2626" }}>
+                    Clé API Brevo requise pour créer une campagne.
+                    <button onClick={() => setShowConfig(true)} style={{ display: "block", marginTop: 4, color: "#6366f1", background: "none", border: "none", cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
+                      → Configurer les APIs
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => { setCampaignSteps([]); setCampaignDone(false); handleBrevoKampaign(); }}
+                  disabled={campaignRunning || !selected.size || !hasBrevo}
+                  className="btn-hover"
+                  style={{
+                    ...styles.btn, padding: "13px", fontSize: 14, fontWeight: 700,
+                    background: selected.size && hasBrevo && !campaignRunning ? "#f59e0b" : "#e5e7eb",
+                    color: selected.size && hasBrevo && !campaignRunning ? "#fff" : "#9ca3af",
+                  }}
+                >
+                  {campaignRunning ? "Création en cours…" : `Créer la campagne${selected.size ? ` (${selected.size})` : ""}`}
+                </button>
+
+                {campaignSteps.length > 0 && (
+                  <div style={{ ...styles.card, border: "1px solid #e0e7ff" }}>
+                    <div style={{ fontWeight: 600, fontSize: 12, color: "#374151", marginBottom: 10 }}>
+                      {campaignDone ? "✅ Campagne créée avec succès" : "Progression"}
+                    </div>
+                    {campaignSteps.map((s, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "6px 0", borderBottom: i < campaignSteps.length - 1 ? "1px solid #f3f4f6" : "none" }}>
+                        <span style={{ fontSize: 13, marginTop: 1, flexShrink: 0 }}>
+                          {s.status === "loading" ? <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>↻</span>
+                            : s.status === "ok" ? "✓"
+                            : "✕"}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: s.status === "ok" ? "#16a34a" : s.status === "error" ? "#dc2626" : "#374151" }}>
+                            {s.label}
+                          </div>
+                          {s.detail && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, wordBreak: "break-word" }}>{s.detail}</div>}
+                        </div>
+                        <span style={{ fontSize: 10, color: "#d1d5db", flexShrink: 0, marginTop: 2 }}>{s.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
