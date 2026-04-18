@@ -17,21 +17,37 @@ const CAT_COLORS = {
   Moto: { bg: "#fee2e2", text: "#991b1b" },
 };
 
-const DEFAULT_TPL = `Bonjour,
+const DEFAULT_TPL = `Bonjour {NOM_AGENCE},
 
-Je me permets de vous contacter au sujet de LocPro, une solution de gestion de contrats de location pensée pour les agences comme {NOM_AGENCE}.
+Je me permets de vous contacter car j'ai développé une solution pensée spécifiquement pour les loueurs indépendants comme vous.
 
-En quelques secondes vous pouvez :
-• Générer un contrat conforme grâce à l'IA
-• Le faire signer électroniquement (eIDAS)
-• Envoyer des rappels SMS automatiques
-• Piloter votre flotte {CATEGORIE} depuis un tableau de bord
+LocPro est une plateforme de gestion de location de véhicules qui remplace entièrement les contrats papier et les tableurs Excel. En moins de 30 secondes, vous créez un contrat complet, l'IA rédige automatiquement les clauses juridiques adaptées à votre véhicule, la facture est générée et envoyée par email à votre client — le tout sans aucune saisie manuelle.
 
-Je serais ravi de vous faire une démo rapide — 15 minutes suffisent.
+Ce que LocPro fait pour vous au quotidien :
+
+— Contrats générés par intelligence artificielle en 30 secondes, adaptés à chaque véhicule et chaque client
+— Facturation automatique dès la signature du contrat
+— Signature électronique certifiée eIDAS — valeur juridique maximale
+— Rappels SMS automatiques envoyés à vos clients (J-2, J-1, jour du retour)
+— Assistant vocal IA qui répond à vos appels et prend les réservations 24h/24
+— Calendrier de vos locations en temps réel — vous voyez en un coup d'œil ce qui est loué, ce qui revient, ce qui est en retard
+— Messagerie centralisée — tous vos échanges clients (SMS, appels) au même endroit
+— Gestion complète de votre flotte — kilométrage, taux d'occupation, CA par véhicule, alertes contrôle technique
+
+LocPro est 100% personnalisable : vos véhicules, vos photos, vos tarifs, vos conditions générales, votre logo. Ce n'est pas une application générique — c'est votre outil, à votre image.
+
+Nos clients loueurs indépendants gagnent en moyenne 8 heures de travail administratif par mois.
+
+Je serais ravi de vous montrer LocPro en action lors d'un appel de 15 minutes, sans engagement. Je m'adapte entièrement à vos disponibilités.
+
+Seriez-vous disponible cette semaine ou la semaine prochaine pour un échange rapide ?
 
 Bien cordialement,
-L'équipe LocPro
-https://locpro.fr`;
+
+[Votre prénom]
+LocPro
+[Votre numéro de téléphone]
+[Votre email]`;
 
 const personalize = (tpl, a) =>
   tpl
@@ -151,7 +167,7 @@ export default function App() {
   const [fReg, setFReg] = useState("Toutes");
   const [fSt, setFSt] = useState("Tous");
   const [tab, setTab] = useState("liste");
-  const [subject, setSubject] = useState("Simplifiez vos contrats de location — LocPro");
+  const [subject, setSubject] = useState("Gérez vos locations en 30 secondes — LocPro");
   const [tpl, setTpl] = useState(DEFAULT_TPL);
   const [senderName, setSenderName] = useState("Équipe LocPro");
   const [senderEmail, setSenderEmail] = useState("prospection@locpro.fr");
@@ -603,7 +619,7 @@ export default function App() {
 
       {/* ── TABS ── */}
       <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "0 24px", display: "flex", gap: 4 }}>
-        {[["liste", "Base Agences"], ["mail", "Campagne Email"], ["import", "Import & Sources"]].map(([k, l]) => (
+        {[["liste", "Base Agences"], ["mail", "Campagne Email"], ["import", "Import & Sources"], ["prospection", "🏢 Prospection"]].map(([k, l]) => (
           <button
             key={k}
             onClick={() => setTab(k)}
@@ -1055,6 +1071,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ══════════════════════ TAB: PROSPECTION ══════════════════════ */}
+      {tab === "prospection" && <Prospects />}
 
       {/* ══════════════════════ MODAL: AJOUT ══════════════════════ */}
       {showAdd && (
