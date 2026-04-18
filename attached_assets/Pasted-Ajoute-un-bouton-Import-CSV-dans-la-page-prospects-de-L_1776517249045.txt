@@ -1,0 +1,77 @@
+Ajoute un bouton "Import CSV" dans la page /prospects de LocPro.
+jsxfunction ImportCSV({ onImport }) {
+  const fileRef = useRef(null)
+
+  async function handleFile(e) {
+    const file = e.target.files[0]
+    if (!file) return
+
+    const text = await file.text()
+    const lines = text.split('\n').filter(l => l.trim())
+    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim())
+
+    const prospects = lines.slice(1).map(line => {
+      const values = line.split(',').map(v => v.replace(/"/g, '').trim())
+      const obj = {}
+      headers.forEach((h, i) => obj[h] = values[i] || '')
+      return {
+        siren: obj['SIREN'],
+        nom: obj['Nom entreprise'],
+        email: obj['Email'],
+        telephone: obj['Téléphone'],
+        ville: obj['Ville'],
+        codePostal: obj['Code postal'],
+        dirigeant: obj['Dirigeant'],
+        siteWeb: obj['Site web'],
+        categorie: obj['Catégorie'] || 'Location véhicules',
+        status: 'nouveau',
+        importedAt: new Date().toISOString()
+      }
+    }).filter(p => p.siren)
+
+    // Dédoublonner et sauvegarder
+    const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
+    const existingSirens = new Set(existing.map(p => p.siren))
+    const nouveaux = prospects.filter(p => !existingSirens.has(p.siren))
+    const merged = [...nouveaux, ...existing]
+    localStorage.setItem('locpro_prospects', JSON.stringify(merged))
+    localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
+
+    onImport({ total: merged.length, nouveaux: nouveaux.length })
+  }
+
+  return (
+    <div>
+      <input
+        type="file"
+        ref={fileRef}
+        accept=".csv"
+        onChange={handleFile}
+        style={{ display: 'none' }}
+      />
+      <button
+        className={styles.btnImport}
+        onClick={() => fileRef.current.click()}>
+        ↑ Import CSV
+      </button>
+    </div>
+  )
+}
+Ajoute ce composant dans le header de la page Prospects, à côté du bouton Export CSV existant. Quand l'import est terminé, affiche une notification : "✓ X nouvelles agences importées".
+
+Résumé du flow complet gratuit :
+Cowork s'exécute à 9h chaque matin
+        ↓
+Pappers API → 400 agences (gratuit)
+        ↓
+Cowork navigue sur chaque site web
+        ↓
+Cowork récupère les emails
+        ↓
+Cowork crée le CSV sur ton Bureau
+        ↓
+Cowork ouvre LocPro et importe le CSV
+        ↓
+Ton tableau se remplit automatiquement
+        ↓
+Resend + Brevo envoient les emails

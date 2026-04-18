@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getProspects, updateProspect, deleteProspect } from '../services/pappersService'
 import { lancerProspectionAuto } from '../services/prospectionAuto'
 
@@ -84,6 +84,8 @@ export default function Prospects() {
   const [selectedDepts, setSelectedDepts] = useState([])
   const [sendEmails, setSendEmails] = useState(false)
   const [lastResult, setLastResult] = useState(null)
+  const [toast, setToast] = useState(null)
+  const csvFileRef = useRef(null)
 
   useEffect(() => {
     const data = getProspects()
@@ -113,8 +115,9 @@ export default function Prospects() {
       setProspects(data)
       setStats(computeStats(data))
       setLastImport(new Date().toISOString())
+      showToast(`✓ ${result.nouveaux} nouvelles agences · ${result.avecEmail} emails trouvés`)
     } catch (err) {
-      alert('Erreur prospection : ' + err.message)
+      showToast('Erreur prospection : ' + err.message)
     }
     setLoading(false)
   }
@@ -132,6 +135,62 @@ export default function Prospects() {
     setProspects(data)
     setStats(computeStats(data))
     setSelectedProspect(null)
+  }
+
+  function showToast(msg) {
+    setToast(msg)
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  async function handleImportCSV(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    e.target.value = ''
+
+    try {
+      const text = await file.text()
+      const lines = text.split('\n').filter(l => l.trim())
+      if (lines.length < 2) { showToast('Fichier CSV vide ou invalide'); return }
+
+      const sep = lines[0].includes(';') ? ';' : ','
+      const headers = lines[0].split(sep).map(h => h.replace(/^"|"$/g, '').trim())
+
+      const imported = lines.slice(1).map(line => {
+        const values = line.split(sep).map(v => v.replace(/^"|"$/g, '').trim())
+        const obj = {}
+        headers.forEach((h, i) => { obj[h] = values[i] || '' })
+        return {
+          siren: obj['SIREN'] || obj['siren'] || `csv_${Date.now()}_${Math.random()}`,
+          nom: obj['Nom'] || obj['Nom entreprise'] || obj['nom'] || '',
+          email: obj['Email'] || obj['email'] || '',
+          telephone: obj['Téléphone'] || obj['telephone'] || obj['tel'] || '',
+          ville: obj['Ville'] || obj['ville'] || '',
+          codePostal: obj['Code postal'] || obj['codePostal'] || '',
+          departement: obj['Département'] || obj['departement'] || '',
+          dirigeant: obj['Dirigeant'] || obj['dirigeant'] || '',
+          siteWeb: obj['Site web'] || obj['siteWeb'] || '',
+          categorie: obj['Catégorie'] || obj['categorie'] || 'Location véhicules',
+          status: obj['Statut'] || obj['status'] || 'nouveau',
+          notes: obj['Notes'] || obj['notes'] || '',
+          importedAt: new Date().toISOString(),
+        }
+      }).filter(p => p.nom)
+
+      const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
+      const existingSirens = new Set(existing.map(p => p.siren))
+      const nouveaux = imported.filter(p => !existingSirens.has(p.siren))
+      const merged = [...nouveaux, ...existing]
+      localStorage.setItem('locpro_prospects', JSON.stringify(merged))
+      localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
+
+      const data = getProspects()
+      setProspects(data)
+      setStats(computeStats(data))
+      setLastImport(new Date().toISOString())
+      showToast(`✓ ${nouveaux.length} nouvelle${nouveaux.length !== 1 ? 's' : ''} agence${nouveaux.length !== 1 ? 's' : ''} importée${nouveaux.length !== 1 ? 's' : ''} (${merged.length} au total)`)
+    } catch (err) {
+      showToast('Erreur lors de la lecture du CSV : ' + err.message)
+    }
   }
 
   function exportCSV() {
@@ -170,7 +229,23 @@ export default function Prospects() {
       <style>{`
         .prospect-card:hover { border-color: #c7d2fe !important; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
       `}</style>
+
+      {/* ── Toast notification ── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 28, left: '50%', transform: 'translateX(-50%)',
+          background: toast.startsWith('✓') ? '#16a34a' : '#dc2626',
+          color: '#fff', padding: '12px 22px', borderRadius: 10,
+          fontSize: 13, fontWeight: 600, zIndex: 200,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          animation: 'slideIn .25s ease',
+          whiteSpace: 'nowrap',
+        }}>
+          {toast}
+        </div>
+      )}
 
       {/* ── Toolbar ── */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '10px 24px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -199,10 +274,23 @@ export default function Prospects() {
             </button>
           ))}
         </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            ref={csvFileRef}
+            type="file"
+            accept=".csv"
+            onChange={handleImportCSV}
+            style={{ display: 'none' }}
+          />
+          <button
+            onClick={() => csvFileRef.current.click()}
+            style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb', color: '#374151' }}
+          >
+            ↑ Import CSV
+          </button>
           {prospects.length > 0 && (
             <button onClick={exportCSV} style={{ padding: '8px 16px', border: '1px solid #e5e7eb', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f9fafb', color: '#374151' }}>
-              ↓ CSV
+              ↓ Export CSV
             </button>
           )}
           <button onClick={() => { setLastResult(null); setShowImportPanel(true) }} style={{ padding: '8px 16px', border: 'none', borderRadius: 7, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#6366f1', color: '#fff' }}>
