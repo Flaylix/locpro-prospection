@@ -1,3 +1,5 @@
+import { supabase, toDbProspect } from './supabaseClient'
+
 const PAPPERS_KEY = import.meta.env.VITE_PAPPERS_API_KEY
 const HUNTER_KEY  = import.meta.env.VITE_HUNTER_API_KEY
 const RESEND_KEY  = import.meta.env.VITE_RESEND_API_KEY
@@ -7,14 +9,16 @@ const NAF_CODES = ['7711A', '7711B', '7712Z']
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-function updateProspectStatus(siren, status) {
-  const prospects = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
-  const updated = prospects.map(p =>
-    p.siren === siren
-      ? { ...p, status, emailSent: true, emailSentAt: new Date().toISOString() }
-      : p
-  )
-  localStorage.setItem('locpro_prospects', JSON.stringify(updated))
+async function updateProspectStatus(siren, status) {
+  const { error } = await supabase
+    .from('prospects')
+    .update({
+      status,
+      email_sent: true,
+      email_sent_at: new Date().toISOString(),
+    })
+    .eq('siren', siren)
+  if (error) throw new Error('Mise à jour statut Supabase : ' + error.message)
 }
 
 // ─── ÉTAPE 1 : Pappers → agences ───────────────────────────────────────────
@@ -225,14 +229,28 @@ export async function lancerProspectionAuto({
   }
   const avecEmailTrouve = avecEmails.filter(a => a.email)
 
-  // 3. Sauvegarde
-  onProgress?.({ step: 'save', count: avecEmails.length, message: 'Sauvegarde dans LocPro…' })
-  const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
-  const existingSirens = new Set(existing.map(p => p.siren))
+  // 3. Sauvegarde Supabase (upsert atomique)
+  onProgress?.({ step: 'save', count: avecEmails.length, message: 'Sauvegarde dans Supabase…' })
+  const sirens = avecEmails.map(a => a.siren)
+  const { data: existingRows, error: selErr } = await supabase
+    .from('prospects')
+    .select('siren')
+    .in('siren', sirens)
+  if (selErr) throw new Error('Lecture Supabase : ' + selErr.message)
+  const existingSirens = new Set((existingRows || []).map(r => r.siren))
   const nouveaux = avecEmails.filter(a => !existingSirens.has(a.siren))
-  const merged = [...nouveaux, ...existing]
-  localStorage.setItem('locpro_prospects', JSON.stringify(merged))
-  localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
+  if (avecEmails.length) {
+    const { error: upErr } = await supabase
+      .from('prospects')
+      .upsert(avecEmails.map(toDbProspect), { onConflict: 'siren', ignoreDuplicates: true })
+    if (upErr) throw new Error('Sauvegarde Supabase : ' + upErr.message)
+  }
+  const { count: totalCount, error: cErr } = await supabase
+    .from('prospects')
+    .select('*', { count: 'exact', head: true })
+  if (cErr) throw new Error('Comptage Supabase : ' + cErr.message)
+  const merged = { length: totalCount || 0 }
+  try { localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString()) } catch {}
 
   // 4. Envoi emails
   if (envoyerEmails) {
@@ -243,7 +261,7 @@ export async function lancerProspectionAuto({
       const ok = await sendProspectionEmail(agence)
       if (ok) {
         sent++
-        updateProspectStatus(agence.siren, 'contacté')
+        await updateProspectStatus(agence.siren, 'contacté')
         await createBrevoSequence(agence)
       }
       onProgress?.({ step: 'email', count: sent, message: `${sent}/${aEnvoyer.length} emails envoyés` })

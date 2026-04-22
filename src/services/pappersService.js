@@ -1,3 +1,5 @@
+import { supabase, toDbProspect, toDbPartial, fromDbProspect } from './supabaseClient'
+
 const PAPPERS_API_KEY = import.meta.env.VITE_PAPPERS_API_KEY
 
 const NAF_LABELS = {
@@ -75,28 +77,64 @@ export async function importMassif({ departements = [], codesNaf = ['7711A', '77
   return unique.slice(0, 400)
 }
 
-export function saveProspects(prospects) {
-  const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
-  const existingSirens = new Set(existing.map(p => p.siren))
+// ─── Persistance Supabase ────────────────────────────────────────────────
+
+export async function saveProspects(prospects) {
+  if (!prospects.length) return { total: 0, nouveaux: 0 }
+
+  // Vérifier les SIREN existants pour calculer le nombre de nouveaux
+  const { data: existingRows, error: selErr } = await supabase
+    .from('prospects')
+    .select('siren')
+    .in('siren', prospects.map(p => p.siren))
+  if (selErr) throw new Error('Lecture Supabase : ' + selErr.message)
+
+  const existingSirens = new Set((existingRows || []).map(r => r.siren))
   const nouveaux = prospects.filter(p => !existingSirens.has(p.siren))
-  const merged = [...nouveaux, ...existing]
-  localStorage.setItem('locpro_prospects', JSON.stringify(merged))
-  localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
-  return { total: merged.length, nouveaux: nouveaux.length }
+
+  // Upsert atomique (évite les races sur PK siren)
+  const { error: upErr } = await supabase
+    .from('prospects')
+    .upsert(prospects.map(toDbProspect), { onConflict: 'siren', ignoreDuplicates: true })
+  if (upErr) throw new Error('Sauvegarde Supabase : ' + upErr.message)
+
+  const { count, error: cErr } = await supabase
+    .from('prospects')
+    .select('*', { count: 'exact', head: true })
+  if (cErr) throw new Error('Comptage Supabase : ' + cErr.message)
+
+  try {
+    localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
+  } catch {}
+
+  return { total: count || 0, nouveaux: nouveaux.length }
 }
 
-export function getProspects() {
-  return JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
+export async function getProspects() {
+  const { data, error } = await supabase
+    .from('prospects')
+    .select('*')
+    .order('imported_at', { ascending: false })
+  if (error) throw new Error('Lecture Supabase : ' + error.message)
+  return (data || []).map(fromDbProspect)
 }
 
-export function updateProspect(siren, updates) {
-  const prospects = getProspects()
-  const updated = prospects.map(p => p.siren === siren ? { ...p, ...updates } : p)
-  localStorage.setItem('locpro_prospects', JSON.stringify(updated))
-  return updated
+export async function updateProspect(siren, updates) {
+  const dbUpdates = toDbPartial(updates)
+  delete dbUpdates.siren
+  if (Object.keys(dbUpdates).length === 0) return getProspects()
+  const { error } = await supabase
+    .from('prospects')
+    .update(dbUpdates)
+    .eq('siren', siren)
+  if (error) throw new Error('Mise à jour Supabase : ' + error.message)
+  return getProspects()
 }
 
-export function deleteProspect(siren) {
-  const prospects = getProspects().filter(p => p.siren !== siren)
-  localStorage.setItem('locpro_prospects', JSON.stringify(prospects))
+export async function deleteProspect(siren) {
+  const { error } = await supabase
+    .from('prospects')
+    .delete()
+    .eq('siren', siren)
+  if (error) throw new Error('Suppression Supabase : ' + error.message)
 }

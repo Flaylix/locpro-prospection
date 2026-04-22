@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getProspects, updateProspect, deleteProspect } from '../services/pappersService'
+import { getProspects, updateProspect, deleteProspect, saveProspects } from '../services/pappersService'
 import { lancerProspectionAuto } from '../services/prospectionAuto'
 
 const DEPARTEMENTS = [
@@ -88,10 +88,16 @@ export default function Prospects() {
   const csvFileRef = useRef(null)
 
   useEffect(() => {
-    const data = getProspects()
-    setProspects(data)
-    setLastImport(localStorage.getItem('locpro_prospects_lastImport'))
-    setStats(computeStats(data))
+    (async () => {
+      try {
+        const data = await getProspects()
+        setProspects(data)
+        setLastImport(localStorage.getItem('locpro_prospects_lastImport'))
+        setStats(computeStats(data))
+      } catch (err) {
+        showToast('Erreur chargement : ' + err.message)
+      }
+    })()
   }, [])
 
   async function handleProspectionAuto() {
@@ -111,7 +117,7 @@ export default function Prospects() {
         onProgress: info => setProgressInfo(info),
       })
       setLastResult(result)
-      const data = getProspects()
+      const data = await getProspects()
       setProspects(data)
       setStats(computeStats(data))
       setLastImport(new Date().toISOString())
@@ -122,19 +128,27 @@ export default function Prospects() {
     setLoading(false)
   }
 
-  function handleStatusChange(siren, newStatus) {
-    const updated = updateProspect(siren, { status: newStatus })
-    setProspects(updated)
-    setStats(computeStats(updated))
-    setSelectedProspect(p => p ? { ...p, status: newStatus } : null)
+  async function handleStatusChange(siren, newStatus) {
+    try {
+      const updated = await updateProspect(siren, { status: newStatus })
+      setProspects(updated)
+      setStats(computeStats(updated))
+      setSelectedProspect(p => p ? { ...p, status: newStatus } : null)
+    } catch (err) {
+      showToast('Erreur : ' + err.message)
+    }
   }
 
-  function handleDelete(siren) {
-    deleteProspect(siren)
-    const data = getProspects()
-    setProspects(data)
-    setStats(computeStats(data))
-    setSelectedProspect(null)
+  async function handleDelete(siren) {
+    try {
+      await deleteProspect(siren)
+      const data = await getProspects()
+      setProspects(data)
+      setStats(computeStats(data))
+      setSelectedProspect(null)
+    } catch (err) {
+      showToast('Erreur : ' + err.message)
+    }
   }
 
   function showToast(msg) {
@@ -176,18 +190,12 @@ export default function Prospects() {
         }
       }).filter(p => p.nom)
 
-      const existing = JSON.parse(localStorage.getItem('locpro_prospects') || '[]')
-      const existingSirens = new Set(existing.map(p => p.siren))
-      const nouveaux = imported.filter(p => !existingSirens.has(p.siren))
-      const merged = [...nouveaux, ...existing]
-      localStorage.setItem('locpro_prospects', JSON.stringify(merged))
-      localStorage.setItem('locpro_prospects_lastImport', new Date().toISOString())
-
-      const data = getProspects()
+      const result = await saveProspects(imported)
+      const data = await getProspects()
       setProspects(data)
       setStats(computeStats(data))
       setLastImport(new Date().toISOString())
-      showToast(`✓ ${nouveaux.length} nouvelle${nouveaux.length !== 1 ? 's' : ''} agence${nouveaux.length !== 1 ? 's' : ''} importée${nouveaux.length !== 1 ? 's' : ''} (${merged.length} au total)`)
+      showToast(`✓ ${result.nouveaux} nouvelle${result.nouveaux !== 1 ? 's' : ''} agence${result.nouveaux !== 1 ? 's' : ''} importée${result.nouveaux !== 1 ? 's' : ''} (${result.total} au total)`)
     } catch (err) {
       showToast('Erreur lors de la lecture du CSV : ' + err.message)
     }
